@@ -1,14 +1,55 @@
 // src/Sidebar.jsx
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { getDisplayImageUrl } from './imageUtils.js';
 import { appendEvaluationLog } from './evaluationLog.js';
 
 // accept new prop: onDeleteElement
-export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEdgeLabelChange, storyContext, worldBible, addNodeFromSuggestion, onDeleteElement }) {
+export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEdgeLabelChange, onEdgeDataChange, storyContext, worldBible, attributeKeyOptions, sidebarWidth, onSidebarWidthChange, addNodeFromSuggestion, onDeleteElement }) {
   const [isTextLoading, setIsTextLoading] = useState(false);
   const [isImageLoading, setIsImageLoading] = useState(false);
+  const [nodeOnEnterEffects, setNodeOnEnterEffects] = useState([]);
+  const [edgeRequirements, setEdgeRequirements] = useState([]);
+  const [edgeEffects, setEdgeEffects] = useState([]);
+  const resizeRef = useRef(null);
   const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
   const locationOptions = Array.from(new Set((worldBible?.locations || []).map((l) => (l?.name || '').trim()).filter(Boolean)));
+  const attributeKeys = Array.isArray(attributeKeyOptions) ? attributeKeyOptions : [];
+
+  useEffect(() => {
+    if (selectedNode) {
+      const v = selectedNode?.data?.onEnterEffects;
+      setNodeOnEnterEffects(Array.isArray(v) ? v.map((e) => ({
+        key: typeof e?.key === 'string' ? e.key : '',
+        op: typeof e?.op === 'string' ? e.op : 'set',
+        valueKind: (typeof e?.value === 'boolean') ? 'boolean' : (typeof e?.value === 'number' ? 'number' : 'text'),
+        value: e?.value,
+      })) : []);
+    } else {
+      setNodeOnEnterEffects([]);
+    }
+  }, [selectedNode?.id]);
+
+  useEffect(() => {
+    if (selectedEdge) {
+      const r = selectedEdge?.data?.requirements;
+      const e = selectedEdge?.data?.effects;
+      setEdgeRequirements(Array.isArray(r) ? r.map((c) => ({
+        key: typeof c?.key === 'string' ? c.key : '',
+        op: typeof c?.op === 'string' ? c.op : 'truthy',
+        valueKind: (typeof c?.value === 'boolean') ? 'boolean' : (typeof c?.value === 'number' ? 'number' : 'text'),
+        value: c?.value,
+      })) : []);
+      setEdgeEffects(Array.isArray(e) ? e.map((eff) => ({
+        key: typeof eff?.key === 'string' ? eff.key : '',
+        op: typeof eff?.op === 'string' ? eff.op : 'set',
+        valueKind: (typeof eff?.value === 'boolean') ? 'boolean' : (typeof eff?.value === 'number' ? 'number' : 'text'),
+        value: eff?.value,
+      })) : []);
+    } else {
+      setEdgeRequirements([]);
+      setEdgeEffects([]);
+    }
+  }, [selectedEdge?.id]);
 
   const handleNodeDataChange = (event) => {
     onDataChange({ [event.target.name]: event.target.value });
@@ -16,6 +57,65 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
 
   const handleEdgeLabelChange = (event) => {
     onEdgeLabelChange(event.target.value);
+  };
+
+  const handleEdgeSingleUseChange = (event) => {
+    if (!onEdgeDataChange) return;
+    onEdgeDataChange({ singleUse: event.target.checked });
+  };
+
+  const needsValueForCondition = (op) => ['==', '!=', '>', '>=', '<', '<='].includes(op);
+  const needsValueForEffect = (op) => ['set', 'inc', 'dec'].includes(op);
+
+  const normalizeValueByKind = (kind, value, fallback = '') => {
+    if (kind === 'boolean') return Boolean(value);
+    if (kind === 'number') {
+      const n = typeof value === 'number' ? value : Number(value);
+      return Number.isFinite(n) ? n : 0;
+    }
+    if (value === undefined || value === null) return fallback;
+    return `${value}`;
+  };
+
+  const commitNodeEffects = (list) => {
+    const clean = list
+      .filter((r) => typeof r?.key === 'string' && r.key.trim())
+      .map((r) => {
+        const op = typeof r?.op === 'string' ? r.op : 'set';
+        if (!needsValueForEffect(op) || op === 'toggle' || op === 'unset') {
+          return { key: r.key.trim(), op };
+        }
+        const kind = r?.valueKind === 'number' ? 'number' : (r?.valueKind === 'boolean' ? 'boolean' : 'text');
+        const fallback = op === 'inc' || op === 'dec' ? 1 : '';
+        return { key: r.key.trim(), op, value: normalizeValueByKind(kind, r.value, fallback) };
+      });
+    onDataChange({ onEnterEffects: clean.length ? clean : undefined });
+  };
+
+  const commitEdgeReqs = (list) => {
+    if (!onEdgeDataChange) return;
+    const clean = list
+      .filter((r) => typeof r?.key === 'string' && r.key.trim())
+      .map((r) => {
+        const op = typeof r?.op === 'string' ? r.op : 'truthy';
+        if (!needsValueForCondition(op)) return { key: r.key.trim(), op };
+        const kind = r?.valueKind === 'number' ? 'number' : (r?.valueKind === 'boolean' ? 'boolean' : 'text');
+        return { key: r.key.trim(), op, value: normalizeValueByKind(kind, r.value) };
+      });
+    onEdgeDataChange({ requirements: clean.length ? clean : undefined });
+  };
+
+  const commitEdgeEffs = (list) => {
+    if (!onEdgeDataChange) return;
+    const clean = list
+      .filter((r) => typeof r?.key === 'string' && r.key.trim())
+      .map((r) => {
+        const op = typeof r?.op === 'string' ? r.op : 'set';
+        if (!needsValueForEffect(op) || op === 'toggle' || op === 'unset') return { key: r.key.trim(), op };
+        const kind = r?.valueKind === 'number' ? 'number' : (r?.valueKind === 'boolean' ? 'boolean' : 'text');
+        return { key: r.key.trim(), op, value: normalizeValueByKind(kind, r.value, op === 'inc' || op === 'dec' ? 1 : '') };
+      });
+    onEdgeDataChange({ effects: clean.length ? clean : undefined });
   };
 
   const handleTextGenerate = async () => {  
@@ -42,7 +142,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
       const response = await fetch(`${apiBaseUrl}/api/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // 发送当前输入框里的 description 作为参考
+        // Send the current description as context
         body: JSON.stringify(requestBody),
       });
       
@@ -52,6 +152,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
           type: 'ai_generate_text_error',
           nodeId: selectedNode.id,
           title: selectedNode.data.label,
+          location: selectedNode?.data?.location || '',
           status: response.status,
           durationMs: Math.round(performance.now() - startedAt),
           error: errorData.details || errorData.error || 'Network response was not ok',
@@ -65,6 +166,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
         type: 'ai_generate_text_success',
         nodeId: selectedNode.id,
         title: selectedNode.data.label,
+        location: selectedNode?.data?.location || '',
         durationMs: Math.round(performance.now() - startedAt),
         model: data?.meta?.model || '',
         actionsCount: Array.isArray(data.actions) ? data.actions.length : 0,
@@ -132,9 +234,57 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
     }
   };
 
+  const onResizePointerDown = (e) => {
+    if (typeof onSidebarWidthChange !== 'function') return;
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startW = Number.isFinite(sidebarWidth) ? sidebarWidth : 420;
+    resizeRef.current = { startX, startW, pid: e.pointerId };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+    }
+  };
+
+  const onResizePointerMove = (e) => {
+    const d = resizeRef.current;
+    if (!d) return;
+    if (typeof onSidebarWidthChange !== 'function') return;
+    e.preventDefault();
+    e.stopPropagation();
+    const deltaX = e.clientX - d.startX;
+    const nextW = Math.max(340, Math.min(700, d.startW - deltaX));
+    onSidebarWidthChange(nextW, false);
+  };
+
+  const onResizePointerUp = (e) => {
+    const d = resizeRef.current;
+    if (!d) return;
+    resizeRef.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(d.pid);
+    } catch {
+    }
+    if (typeof onSidebarWidthChange === 'function') {
+      const currentW = Number.isFinite(sidebarWidth) ? sidebarWidth : 420;
+      onSidebarWidthChange(currentW, true);
+    }
+  };
+
   if (selectedNode) {
     return (
-      <aside className="sidebar">
+      <aside className="sidebar" style={{ width: Number.isFinite(sidebarWidth) ? `${sidebarWidth}px` : undefined }}>
+        <div
+          className="sidebar-resizer"
+          onPointerDown={onResizePointerDown}
+          onPointerMove={onResizePointerMove}
+          onPointerUp={onResizePointerUp}
+          onPointerCancel={onResizePointerUp}
+          role="separator"
+          tabIndex={0}
+          aria-orientation="vertical"
+        />
         <h3>Edit Scene</h3>
         <label>Title:</label>
         <input name="label" value={selectedNode.data.label} onChange={handleNodeDataChange} />
@@ -164,6 +314,124 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
         </div>
         <textarea name="description" rows="8" value={selectedNode.data.description || ''} onChange={handleNodeDataChange} />
 
+        <datalist id="attr-keys">
+          {attributeKeys.map((k) => (
+            <option key={k} value={k} />
+          ))}
+        </datalist>
+
+        <label>On Enter Effects:</label>
+        <div className="attr-list">
+          {nodeOnEnterEffects.map((row, idx) => {
+            const op = typeof row?.op === 'string' ? row.op : 'set';
+            const showValue = needsValueForEffect(op);
+            const kind = row?.valueKind === 'number' ? 'number' : (row?.valueKind === 'boolean' ? 'boolean' : 'text');
+            const valueKindLocked = op === 'inc' || op === 'dec';
+            const effKind = valueKindLocked ? 'number' : kind;
+            const value = normalizeValueByKind(effKind, row?.value, valueKindLocked ? 1 : '');
+            return (
+              <div className="attr-row" key={idx}>
+                <input
+                  list="attr-keys"
+                  value={row?.key || ''}
+                  onChange={(e) => {
+                    const next = nodeOnEnterEffects.map((r, i) => (i === idx ? { ...r, key: e.target.value } : r));
+                    setNodeOnEnterEffects(next);
+                    commitNodeEffects(next);
+                  }}
+                  placeholder="key"
+                />
+                <select
+                  value={op}
+                  onChange={(e) => {
+                    const nextOp = e.target.value;
+                    const next = nodeOnEnterEffects.map((r, i) => (i === idx ? { ...r, op: nextOp, valueKind: (nextOp === 'inc' || nextOp === 'dec') ? 'number' : r.valueKind } : r));
+                    setNodeOnEnterEffects(next);
+                    commitNodeEffects(next);
+                  }}
+                >
+                  <option value="set">Set</option>
+                  <option value="toggle">Toggle</option>
+                  <option value="inc">Increase</option>
+                  <option value="dec">Decrease</option>
+                  <option value="unset">Unset</option>
+                </select>
+                {showValue ? (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    {!valueKindLocked ? (
+                      <select
+                        value={effKind}
+                        onChange={(e) => {
+                          const nextKind = e.target.value;
+                          const nextVal = nextKind === 'boolean' ? Boolean(row?.value) : (nextKind === 'number' ? Number(row?.value ?? 0) : `${row?.value ?? ''}`);
+                          const next = nodeOnEnterEffects.map((r, i) => (i === idx ? { ...r, valueKind: nextKind, value: nextVal } : r));
+                          setNodeOnEnterEffects(next);
+                          commitNodeEffects(next);
+                        }}
+                      >
+                        <option value="boolean">Bool</option>
+                        <option value="number">Number</option>
+                        <option value="text">Text</option>
+                      </select>
+                    ) : null}
+                    {effKind === 'boolean' ? (
+                      <input
+                        type="checkbox"
+                        checked={Boolean(value)}
+                        onChange={(e) => {
+                          const next = nodeOnEnterEffects.map((r, i) => (i === idx ? { ...r, value: e.target.checked, valueKind: 'boolean' } : r));
+                          setNodeOnEnterEffects(next);
+                          commitNodeEffects(next);
+                        }}
+                        style={{ width: 18, height: 18 }}
+                      />
+                    ) : (
+                      <input
+                        type={effKind === 'number' ? 'number' : 'text'}
+                        value={effKind === 'number' ? String(value) : value}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          const nextValue = effKind === 'number' ? Number(raw) : raw;
+                          const next = nodeOnEnterEffects.map((r, i) => (i === idx ? { ...r, value: nextValue, valueKind: effKind } : r));
+                          setNodeOnEnterEffects(next);
+                          commitNodeEffects(next);
+                        }}
+                        placeholder={effKind === 'number' ? '0' : 'value'}
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <div />
+                )}
+                <button
+                  type="button"
+                  className="attr-remove"
+                  onClick={() => {
+                    const next = nodeOnEnterEffects.filter((_, i) => i !== idx);
+                    setNodeOnEnterEffects(next);
+                    commitNodeEffects(next);
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <div className="attr-actions">
+          <button
+            type="button"
+            className="attr-add"
+            onClick={() => {
+              const next = [...nodeOnEnterEffects, { key: '', op: 'set', valueKind: 'boolean', value: true }];
+              setNodeOnEnterEffects(next);
+              commitNodeEffects(next);
+            }}
+          >
+            + Add Effect
+          </button>
+        </div>
+
         {selectedNode.data.suggestedActions && (
           <div className="suggestions-container">
             <h4>AI Suggested Actions:</h4>
@@ -176,6 +444,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
                       type: 'apply_suggested_action',
                       nodeId: selectedNode.id,
                       title: selectedNode.data.label,
+                      location: selectedNode?.data?.location || '',
                       action,
                     });
                     addNodeFromSuggestion(selectedNode.id, action);
@@ -196,10 +465,266 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
 
   if (selectedEdge) {
     return (
-      <aside className="sidebar">
+      <aside className="sidebar" style={{ width: Number.isFinite(sidebarWidth) ? `${sidebarWidth}px` : undefined }}>
+        <div
+          className="sidebar-resizer"
+          onPointerDown={onResizePointerDown}
+          onPointerMove={onResizePointerMove}
+          onPointerUp={onResizePointerUp}
+          onPointerCancel={onResizePointerUp}
+          role="separator"
+          tabIndex={0}
+          aria-orientation="vertical"
+        />
         <h3>Edit Choice</h3>
         <label>Label:</label>
         <input value={selectedEdge.label} onChange={handleEdgeLabelChange} />
+
+        <div className="sidebar-checkbox-row">
+          <input
+            className="sidebar-checkbox"
+            id="edge-single-use"
+            type="checkbox"
+            checked={Boolean(selectedEdge?.data?.singleUse)}
+            onChange={handleEdgeSingleUseChange}
+          />
+          <label className="sidebar-checkbox-label" htmlFor="edge-single-use">Single-use (choose once)</label>
+        </div>
+
+        <datalist id="attr-keys">
+          {attributeKeys.map((k) => (
+            <option key={k} value={k} />
+          ))}
+        </datalist>
+
+        <label>Requirements:</label>
+        <div className="attr-list">
+          {edgeRequirements.map((row, idx) => {
+            const op = typeof row?.op === 'string' ? row.op : 'truthy';
+            const showValue = needsValueForCondition(op);
+            const valueKindLocked = op === '>' || op === '>=' || op === '<' || op === '<=';
+            const kind = row?.valueKind === 'number' ? 'number' : (row?.valueKind === 'boolean' ? 'boolean' : 'text');
+            const condKind = valueKindLocked ? 'number' : kind;
+            const value = normalizeValueByKind(condKind, row?.value, '');
+            return (
+              <div className="attr-row" key={idx}>
+                <input
+                  list="attr-keys"
+                  value={row?.key || ''}
+                  onChange={(e) => {
+                    const next = edgeRequirements.map((r, i) => (i === idx ? { ...r, key: e.target.value } : r));
+                    setEdgeRequirements(next);
+                    commitEdgeReqs(next);
+                  }}
+                  placeholder="key"
+                />
+                <select
+                  value={op}
+                  onChange={(e) => {
+                    const nextOp = e.target.value;
+                    const next = edgeRequirements.map((r, i) => (i === idx ? { ...r, op: nextOp, valueKind: (nextOp === '>' || nextOp === '>=' || nextOp === '<' || nextOp === '<=') ? 'number' : r.valueKind } : r));
+                    setEdgeRequirements(next);
+                    commitEdgeReqs(next);
+                  }}
+                >
+                  <option value="truthy">is true</option>
+                  <option value="falsy">is false</option>
+                  <option value="exists">exists</option>
+                  <option value="!exists">not exists</option>
+                  <option value="==">equals</option>
+                  <option value="!=">not equals</option>
+                  <option value=">">{'>'}</option>
+                  <option value=">=">{'>='}</option>
+                  <option value="<">{'<'}</option>
+                  <option value="<=">{'<='}</option>
+                </select>
+                {showValue ? (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    {!valueKindLocked ? (
+                      <select
+                        value={condKind}
+                        onChange={(e) => {
+                          const nextKind = e.target.value;
+                          const nextVal = nextKind === 'boolean' ? Boolean(row?.value) : (nextKind === 'number' ? Number(row?.value ?? 0) : `${row?.value ?? ''}`);
+                          const next = edgeRequirements.map((r, i) => (i === idx ? { ...r, valueKind: nextKind, value: nextVal } : r));
+                          setEdgeRequirements(next);
+                          commitEdgeReqs(next);
+                        }}
+                      >
+                        <option value="boolean">Bool</option>
+                        <option value="number">Number</option>
+                        <option value="text">Text</option>
+                      </select>
+                    ) : null}
+                    {condKind === 'boolean' ? (
+                      <input
+                        type="checkbox"
+                        checked={Boolean(value)}
+                        onChange={(e) => {
+                          const next = edgeRequirements.map((r, i) => (i === idx ? { ...r, value: e.target.checked, valueKind: 'boolean' } : r));
+                          setEdgeRequirements(next);
+                          commitEdgeReqs(next);
+                        }}
+                        style={{ width: 18, height: 18 }}
+                      />
+                    ) : (
+                      <input
+                        type={condKind === 'number' ? 'number' : 'text'}
+                        value={condKind === 'number' ? String(value) : value}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          const nextValue = condKind === 'number' ? Number(raw) : raw;
+                          const next = edgeRequirements.map((r, i) => (i === idx ? { ...r, value: nextValue, valueKind: condKind } : r));
+                          setEdgeRequirements(next);
+                          commitEdgeReqs(next);
+                        }}
+                        placeholder={condKind === 'number' ? '0' : 'value'}
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <div />
+                )}
+                <button
+                  type="button"
+                  className="attr-remove"
+                  onClick={() => {
+                    const next = edgeRequirements.filter((_, i) => i !== idx);
+                    setEdgeRequirements(next);
+                    commitEdgeReqs(next);
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <div className="attr-actions">
+          <button
+            type="button"
+            className="attr-add"
+            onClick={() => {
+              const next = [...edgeRequirements, { key: '', op: 'truthy', valueKind: 'boolean', value: true }];
+              setEdgeRequirements(next);
+              commitEdgeReqs(next);
+            }}
+          >
+            + Add Condition
+          </button>
+        </div>
+
+        <label>Effects:</label>
+        <div className="attr-list">
+          {edgeEffects.map((row, idx) => {
+            const op = typeof row?.op === 'string' ? row.op : 'set';
+            const showValue = needsValueForEffect(op);
+            const kind = row?.valueKind === 'number' ? 'number' : (row?.valueKind === 'boolean' ? 'boolean' : 'text');
+            const valueKindLocked = op === 'inc' || op === 'dec';
+            const effKind = valueKindLocked ? 'number' : kind;
+            const value = normalizeValueByKind(effKind, row?.value, valueKindLocked ? 1 : '');
+            return (
+              <div className="attr-row" key={idx}>
+                <input
+                  list="attr-keys"
+                  value={row?.key || ''}
+                  onChange={(e) => {
+                    const next = edgeEffects.map((r, i) => (i === idx ? { ...r, key: e.target.value } : r));
+                    setEdgeEffects(next);
+                    commitEdgeEffs(next);
+                  }}
+                  placeholder="key"
+                />
+                <select
+                  value={op}
+                  onChange={(e) => {
+                    const nextOp = e.target.value;
+                    const next = edgeEffects.map((r, i) => (i === idx ? { ...r, op: nextOp, valueKind: (nextOp === 'inc' || nextOp === 'dec') ? 'number' : r.valueKind } : r));
+                    setEdgeEffects(next);
+                    commitEdgeEffs(next);
+                  }}
+                >
+                  <option value="set">Set</option>
+                  <option value="toggle">Toggle</option>
+                  <option value="inc">Increase</option>
+                  <option value="dec">Decrease</option>
+                  <option value="unset">Unset</option>
+                </select>
+                {showValue ? (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    {!valueKindLocked ? (
+                      <select
+                        value={effKind}
+                        onChange={(e) => {
+                          const nextKind = e.target.value;
+                          const nextVal = nextKind === 'boolean' ? Boolean(row?.value) : (nextKind === 'number' ? Number(row?.value ?? 0) : `${row?.value ?? ''}`);
+                          const next = edgeEffects.map((r, i) => (i === idx ? { ...r, valueKind: nextKind, value: nextVal } : r));
+                          setEdgeEffects(next);
+                          commitEdgeEffs(next);
+                        }}
+                      >
+                        <option value="boolean">Bool</option>
+                        <option value="number">Number</option>
+                        <option value="text">Text</option>
+                      </select>
+                    ) : null}
+                    {effKind === 'boolean' ? (
+                      <input
+                        type="checkbox"
+                        checked={Boolean(value)}
+                        onChange={(e) => {
+                          const next = edgeEffects.map((r, i) => (i === idx ? { ...r, value: e.target.checked, valueKind: 'boolean' } : r));
+                          setEdgeEffects(next);
+                          commitEdgeEffs(next);
+                        }}
+                        style={{ width: 18, height: 18 }}
+                      />
+                    ) : (
+                      <input
+                        type={effKind === 'number' ? 'number' : 'text'}
+                        value={effKind === 'number' ? String(value) : value}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          const nextValue = effKind === 'number' ? Number(raw) : raw;
+                          const next = edgeEffects.map((r, i) => (i === idx ? { ...r, value: nextValue, valueKind: effKind } : r));
+                          setEdgeEffects(next);
+                          commitEdgeEffs(next);
+                        }}
+                        placeholder={effKind === 'number' ? '0' : 'value'}
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <div />
+                )}
+                <button
+                  type="button"
+                  className="attr-remove"
+                  onClick={() => {
+                    const next = edgeEffects.filter((_, i) => i !== idx);
+                    setEdgeEffects(next);
+                    commitEdgeEffs(next);
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <div className="attr-actions">
+          <button
+            type="button"
+            className="attr-add"
+            onClick={() => {
+              const next = [...edgeEffects, { key: '', op: 'set', valueKind: 'boolean', value: true }];
+              setEdgeEffects(next);
+              commitEdgeEffs(next);
+            }}
+          >
+            + Add Effect
+          </button>
+        </div>
 
         {/* --- Delete button --- */}
         <div className="sidebar-separator"></div>

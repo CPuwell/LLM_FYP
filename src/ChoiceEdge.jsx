@@ -33,7 +33,7 @@ const getTangent = (pos) => {
 
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
-const getOffsetCubicPath = ({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, offset, id, labelT }) => {
+const getOffsetCubicPath = ({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, offset, id, labelT, bendDx, bendDy }) => {
   const dx = targetX - sourceX;
   const dy = targetY - sourceY;
   const len = Math.hypot(dx, dy) || 1;
@@ -53,8 +53,10 @@ const getOffsetCubicPath = ({ sourceX, sourceY, targetX, targetY, sourcePosition
   const vx = dx / len;
   const vy = dy / len;
 
-  const mx = sourceX + dx * 0.5 + nx * scaledOffset;
-  const my = sourceY + dy * 0.5 + ny * scaledOffset;
+  const bx = Number.isFinite(bendDx) ? bendDx : 0;
+  const by = Number.isFinite(bendDy) ? bendDy : 0;
+  const mx = sourceX + dx * 0.5 + nx * scaledOffset + bx;
+  const my = sourceY + dy * 0.5 + ny * scaledOffset + by;
 
   const p0 = { x: sourceX, y: sourceY };
   const m0 = { x: mx, y: my };
@@ -114,25 +116,28 @@ const getOffsetCubicPath = ({ sourceX, sourceY, targetX, targetY, sourcePosition
   ];
 };
 
-const getSelfLoopPath = ({ x, y, loopIndex, loopCount }) => {
+const getSelfLoopPath = ({ x, y, loopIndex, loopCount, bendDx, bendDy }) => {
   const base = 70;
   const spread = 28;
   const k = loopCount > 1 ? (loopIndex - (loopCount - 1) / 2) : 0;
   const r = base + Math.abs(k) * spread;
   const dir = k >= 0 ? 1 : -1;
 
+  const bx = Number.isFinite(bendDx) ? bendDx : 0;
+  const by = Number.isFinite(bendDy) ? bendDy : 0;
+
   const sx = x;
   const sy = y;
-  const c1x = x + dir * r;
-  const c1y = y - r;
-  const c2x = x - dir * r;
-  const c2y = y - r;
+  const c1x = x + dir * r + bx;
+  const c1y = y - r + by;
+  const c2x = x - dir * r + bx;
+  const c2y = y - r + by;
   const tx = x;
   const ty = y;
 
   const path = `M ${sx},${sy} C ${c1x},${c1y} ${c2x},${c2y} ${tx},${ty}`;
-  const labelX = x + dir * (r * 0.6);
-  const labelY = y - r;
+  const labelX = x + dir * (r * 0.6) + bx;
+  const labelY = y - r + by;
 
   const p0 = { x: sx, y: sy };
   const p1 = { x: c1x, y: c1y };
@@ -179,6 +184,7 @@ export default function ChoiceEdge({
   label,
   style,
   markerEnd,
+  selected,
   data,
 }) {
   const ctx = useContext(EdgeLabelDragContext);
@@ -186,18 +192,44 @@ export default function ChoiceEdge({
   const zoom = useStore((s) => s.transform[2]);
   const dragRef = useRef(null);
   const [dragging, setDragging] = useState(false);
+  const bendDragRef = useRef(null);
+  const [bendDragging, setBendDragging] = useState(false);
 
   const offset = Number.isFinite(data?.offset) ? data.offset : 0;
   const labelT = Number.isFinite(data?.labelT) ? data.labelT : 0.5;
   const labelDx = Number.isFinite(data?.labelDx) ? data.labelDx : 0;
   const labelDy = Number.isFinite(data?.labelDy) ? data.labelDy : 0;
+  const bendDx = Number.isFinite(data?.bendDx) ? data.bendDx : 0;
+  const bendDy = Number.isFinite(data?.bendDy) ? data.bendDy : 0;
   const isSelfLoop = Boolean(data?.isSelfLoop) || (sourceX === targetX && sourceY === targetY);
   const loopIndex = Number.isFinite(data?.loopIndex) ? data.loopIndex : 0;
   const loopCount = Number.isFinite(data?.loopCount) ? data.loopCount : 1;
 
+  const bendBase = (() => {
+    if (isSelfLoop) {
+      const base = 70;
+      const spread = 28;
+      const k = loopCount > 1 ? (loopIndex - (loopCount - 1) / 2) : 0;
+      const r = base + Math.abs(k) * spread;
+      const dir = k >= 0 ? 1 : -1;
+      return { x: sourceX + dir * (r * 0.6), y: sourceY - r };
+    }
+    const dx = targetX - sourceX;
+    const dy = targetY - sourceY;
+    const len = Math.hypot(dx, dy) || 1;
+    const sign = offset !== 0 ? Math.sign(offset) : ((`${id}`.charCodeAt(0) || 0) % 2 === 0 ? 1 : -1);
+    const scaledOffset = sign * clamp(Math.abs(offset) * 0.22, 0, 70);
+    const nx = -dy / len;
+    const ny = dx / len;
+    return { x: sourceX + dx * 0.5 + nx * scaledOffset, y: sourceY + dy * 0.5 + ny * scaledOffset };
+  })();
+
+  const bendX = bendBase.x + bendDx;
+  const bendY = bendBase.y + bendDy;
+
   const [edgePath, labelX, labelY, arrowX, arrowY, arrowAngle, labelAnchorX, labelAnchorY, startX, startY, endX, endY, endAngle] = isSelfLoop
-    ? getSelfLoopPath({ x: sourceX, y: sourceY, loopIndex, loopCount })
-    : getOffsetCubicPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, offset, id, labelT });
+    ? getSelfLoopPath({ x: sourceX, y: sourceY, loopIndex, loopCount, bendDx, bendDy })
+    : getOffsetCubicPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, offset, id, labelT, bendDx, bendDy });
 
   const text = typeof label === 'string' ? label : '';
   const arrowColor = data?.isBackJump ? '#7c3aed' : '#555';
@@ -243,6 +275,46 @@ export default function ChoiceEdge({
     }
   }, []);
 
+  const onBendPointerDown = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+    bendDragRef.current = { x: e.clientX, y: e.clientY, dx: bendDx, dy: bendDy, z, pid: e.pointerId };
+    setBendDragging(true);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch (err) {
+    }
+  }, [zoom, bendDx, bendDy]);
+
+  const onBendPointerMove = useCallback((e) => {
+    const d = bendDragRef.current;
+    if (!d) return;
+    if (!setEdges) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const nextDx = d.dx + (e.clientX - d.x) / d.z;
+    const nextDy = d.dy + (e.clientY - d.y) / d.z;
+    setEdges((eds) => eds.map((edge) => (
+      edge.id === id
+        ? { ...edge, data: { ...(edge.data && typeof edge.data === 'object' ? edge.data : {}), bendDx: nextDx, bendDy: nextDy } }
+        : edge
+    )));
+  }, [id, setEdges]);
+
+  const onBendPointerUp = useCallback((e) => {
+    const d = bendDragRef.current;
+    if (!d) return;
+    e.preventDefault();
+    e.stopPropagation();
+    bendDragRef.current = null;
+    setBendDragging(false);
+    try {
+      e.currentTarget.releasePointerCapture(d.pid);
+    } catch (err) {
+    }
+  }, []);
+
   return (
     <>
       <BaseEdge id={id} path={edgePath} style={style} markerEnd={markerEnd} />
@@ -268,6 +340,21 @@ export default function ChoiceEdge({
             borderLeftColor: arrowColor,
           }}
         />
+        {(selected || bendDragging) ? (
+          <div
+            className="edge-bend-handle nodrag nopan"
+            style={{
+              transform: `translate(-50%, -50%) translate(${bendX}px,${bendY}px)`,
+              boxShadow: bendDragging ? '0 2px 10px rgba(83, 91, 242, 0.45)' : undefined,
+            }}
+            onPointerDown={onBendPointerDown}
+            onPointerMove={onBendPointerMove}
+            onPointerUp={onBendPointerUp}
+            onPointerCancel={onBendPointerUp}
+            role="button"
+            tabIndex={0}
+          />
+        ) : null}
       </EdgeLabelRenderer>
       {text ? (
         <EdgeLabelRenderer>

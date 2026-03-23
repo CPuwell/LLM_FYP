@@ -17,6 +17,7 @@ export default function GuideModal({ isOpen, onClose }) {
             <li>Node = Location/Scene</li>
             <li>Edge = Action/Choice between scenes</li>
             <li>Click a node/edge to edit details in the right sidebar</li>
+            <li>Resize the sidebar by dragging its left edge</li>
           </ul>
 
           <h3>Story Context</h3>
@@ -40,6 +41,25 @@ export default function GuideModal({ isOpen, onClose }) {
           <ul>
             <li>✨ Generates a scene description and three suggested actions</li>
             <li>Use + on a suggestion to create a new node and connect it</li>
+          </ul>
+
+          <h3>Attributes / Conditions</h3>
+          <ul>
+            <li>Each scene can apply effects when entered (On Enter Effects)</li>
+            <li>Each choice can require conditions (Requirements) and apply effects (Effects)</li>
+            <li>Locked choices are disabled in Player Mode</li>
+            <li>Common examples: hasKey (bool), injured (bool), health (number)</li>
+          </ul>
+
+          <h3>Choice Rules</h3>
+          <ul>
+            <li>Single-use choices can be selected only once in Player Mode</li>
+          </ul>
+
+          <h3>Edge Routing</h3>
+          <ul>
+            <li>Select an edge to reveal a draggable midpoint control</li>
+            <li>Drag it to adjust the edge path and improve readability</li>
           </ul>
 
           <h3>Images</h3>

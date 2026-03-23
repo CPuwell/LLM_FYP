@@ -2,10 +2,14 @@
 import React, { useState, useEffect } from 'react';
 import './PlayerView.css'; 
 import { getDisplayImageUrl } from './imageUtils.js';
+import { applyEffects, evaluateConditions } from './attributeEngine.js';
 
 export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }) {
   const [currentNodeId, setCurrentNodeId] = useState(initialNodeId);
   const [history, setHistory] = useState([]);
+  const [usedChoiceIds, setUsedChoiceIds] = useState(() => new Set());
+  const [attributes, setAttributes] = useState({});
+  const [appliedNodeEffectIds, setAppliedNodeEffectIds] = useState(() => new Set());
 
   const [currentNode, setCurrentNode] = useState(null);
   const [currentChoices, setCurrentChoices] = useState([]);
@@ -15,6 +19,9 @@ export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }
     const exists = nodes.some((n) => n.id === initialNodeId);
     setCurrentNodeId(exists ? initialNodeId : nodes[0].id);
     setHistory([]);
+    setUsedChoiceIds(new Set());
+    setAttributes({});
+    setAppliedNodeEffectIds(new Set());
   }, [initialNodeId, nodes]);
 
   // Update currentNode and currentChoices whenever currentNodeId changes
@@ -35,9 +42,40 @@ export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }
     }
   }, [currentNodeId, nodes, edges]);
 
-  const handleChoiceClick = (targetNodeId) => {
+  useEffect(() => {
+    if (!nodes || nodes.length === 0) return;
+    const node = nodes.find((n) => n.id === currentNodeId);
+    if (!node) return;
+    const effects = node?.data?.onEnterEffects;
+    const effectId = `node:${node.id}`;
+    if (!effects) return;
+    setAppliedNodeEffectIds((prev) => {
+      if (prev.has(effectId)) return prev;
+      setAttributes((a) => applyEffects(a, effects));
+      const next = new Set(prev);
+      next.add(effectId);
+      return next;
+    });
+  }, [currentNodeId, nodes]);
+
+  const handleChoiceClick = (edge) => {
+    if (!edge) return;
+    const locked = !evaluateConditions(attributes, edge?.data?.requirements);
+    if (locked) return;
+    const isSingleUse = Boolean(edge?.data?.singleUse);
+    if (isSingleUse && usedChoiceIds.has(edge.id)) return;
+    if (isSingleUse) {
+      setUsedChoiceIds((prev) => {
+        const next = new Set(prev);
+        next.add(edge.id);
+        return next;
+      });
+    }
+    if (edge?.data?.effects) {
+      setAttributes((a) => applyEffects(a, edge.data.effects));
+    }
     setHistory((h) => [...h, currentNodeId]);
-    setCurrentNodeId(targetNodeId);
+    setCurrentNodeId(edge.target);
   };
 
   const handleBack = () => {
@@ -53,6 +91,9 @@ export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }
     if (!nodes || nodes.length === 0) return;
     const exists = nodes.some((n) => n.id === initialNodeId);
     setHistory([]);
+    setUsedChoiceIds(new Set());
+    setAttributes({});
+    setAppliedNodeEffectIds(new Set());
     setCurrentNodeId(exists ? initialNodeId : nodes[0].id);
   };
 
@@ -96,11 +137,23 @@ export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }
 
         <div className="player-choices">
           {currentChoices.length > 0 ? (
-            currentChoices.map((edge) => (
-              <button key={edge.id} onClick={() => handleChoiceClick(edge.target)} className="player-choice-button">
-                {edge.label}
-              </button>
-            ))
+            currentChoices.map((edge) => {
+              const locked = !evaluateConditions(attributes, edge?.data?.requirements);
+              const usedUp = Boolean(edge?.data?.singleUse) && usedChoiceIds.has(edge.id);
+              const disabled = locked || usedUp;
+              const title = locked ? 'Locked' : undefined;
+              return (
+                <button
+                  key={edge.id}
+                  onClick={() => handleChoiceClick(edge)}
+                  className="player-choice-button"
+                  disabled={disabled}
+                  title={title}
+                >
+                  {edge.label}
+                </button>
+              );
+            })
           ) : (
             <p className="end-of-story">--- The End ---</p>
           )}

@@ -73,3 +73,19 @@
   transform-origin: 0 50%;
   pointer-events: none;
 }
+
+.edge-bend-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 2px solid rgba(83, 91, 242, 0.9);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  pointer-events: all;
+  cursor: grab;
+}
+
+.edge-bend-handle:active {
+  cursor: grabbing;
+}

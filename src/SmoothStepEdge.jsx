@@ -3,6 +3,39 @@ import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, useStore } from 'reactf
 import './ChoiceEdge.css';
 import { EdgeLabelDragContext } from './EdgeLabelDragContext.js';
 
+const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
+const getTangent = (pos) => {
+  if (pos === 'top') return { x: 0, y: -1 };
+  if (pos === 'bottom') return { x: 0, y: 1 };
+  if (pos === 'left') return { x: -1, y: 0 };
+  if (pos === 'right') return { x: 1, y: 0 };
+  return { x: 0, y: 1 };
+};
+
+const getBendCubicPath = ({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, bendX, bendY }) => {
+  const dx = targetX - sourceX;
+  const dy = targetY - sourceY;
+  const len = Math.hypot(dx, dy) || 1;
+  const vx = dx / len;
+  const vy = dy / len;
+  const ts = getTangent(sourcePosition);
+  const tt = getTangent(targetPosition);
+  const tangentLen = clamp(len * 0.26, 40, 140);
+  const midLen = tangentLen * 0.7;
+
+  const p0 = { x: sourceX, y: sourceY };
+  const m0 = { x: bendX, y: bendY };
+  const p3 = { x: targetX, y: targetY };
+
+  const a1 = { x: p0.x + ts.x * tangentLen, y: p0.y + ts.y * tangentLen };
+  const a2 = { x: m0.x - vx * midLen, y: m0.y - vy * midLen };
+  const b1 = { x: m0.x + vx * midLen, y: m0.y + vy * midLen };
+  const b2 = { x: p3.x - tt.x * tangentLen, y: p3.y - tt.y * tangentLen };
+
+  return `M ${p0.x},${p0.y} C ${a1.x},${a1.y} ${a2.x},${a2.y} ${m0.x},${m0.y} C ${b1.x},${b1.y} ${b2.x},${b2.y} ${p3.x},${p3.y}`;
+};
+
 export default function SmoothStepEdge({
   id,
   sourceX,
@@ -22,12 +55,22 @@ export default function SmoothStepEdge({
   const zoom = useStore((s) => s.transform[2]);
   const dragRef = useRef(null);
   const [dragging, setDragging] = useState(false);
+  const bendDragRef = useRef(null);
+  const [bendDragging, setBendDragging] = useState(false);
 
   const offset = Number.isFinite(data?.offset) ? data.offset : 0;
   const labelT = Number.isFinite(data?.labelT) ? data.labelT : 0.5;
   const labelDx = Number.isFinite(data?.labelDx) ? data.labelDx : 0;
   const labelDy = Number.isFinite(data?.labelDy) ? data.labelDy : 0;
-  const [edgePath] = getSmoothStepPath({
+  const bendDx = Number.isFinite(data?.bendDx) ? data.bendDx : 0;
+  const bendDy = Number.isFinite(data?.bendDy) ? data.bendDy : 0;
+  const bendBaseX = (sourceX + targetX) / 2;
+  const bendBaseY = (sourceY + targetY) / 2;
+  const bendX = bendBaseX + bendDx;
+  const bendY = bendBaseY + bendDy;
+
+  const hasBend = Math.abs(bendDx) > 0.01 || Math.abs(bendDy) > 0.01;
+  const [smoothPath] = getSmoothStepPath({
     sourceX,
     sourceY,
     sourcePosition,
@@ -37,6 +80,9 @@ export default function SmoothStepEdge({
     offset,
     borderRadius: 14,
   });
+  const edgePath = hasBend
+    ? getBendCubicPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, bendX, bendY })
+    : smoothPath;
 
   const pathRef = useRef(null);
   const [layout, setLayout] = useState(null);
@@ -154,6 +200,46 @@ export default function SmoothStepEdge({
     }
   }, []);
 
+  const onBendPointerDown = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+    bendDragRef.current = { x: e.clientX, y: e.clientY, dx: bendDx, dy: bendDy, z, pid: e.pointerId };
+    setBendDragging(true);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch (err) {
+    }
+  }, [zoom, bendDx, bendDy]);
+
+  const onBendPointerMove = useCallback((e) => {
+    const d = bendDragRef.current;
+    if (!d) return;
+    if (!setEdges) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const nextDx = d.dx + (e.clientX - d.x) / d.z;
+    const nextDy = d.dy + (e.clientY - d.y) / d.z;
+    setEdges((eds) => eds.map((edge) => (
+      edge.id === id
+        ? { ...edge, data: { ...(edge.data && typeof edge.data === 'object' ? edge.data : {}), bendDx: nextDx, bendDy: nextDy } }
+        : edge
+    )));
+  }, [id, setEdges]);
+
+  const onBendPointerUp = useCallback((e) => {
+    const d = bendDragRef.current;
+    if (!d) return;
+    e.preventDefault();
+    e.stopPropagation();
+    bendDragRef.current = null;
+    setBendDragging(false);
+    try {
+      e.currentTarget.releasePointerCapture(d.pid);
+    } catch (err) {
+    }
+  }, []);
+
   return (
     <>
       <BaseEdge id={id} path={edgePath} style={style} markerEnd={markerEnd} />
@@ -206,16 +292,48 @@ export default function SmoothStepEdge({
               >
                 {text}
               </div>
+              {(selected || bendDragging) ? (
+                <div
+                  className="edge-bend-handle nodrag nopan"
+                  style={{
+                    transform: `translate(-50%, -50%) translate(${bendX}px,${bendY}px)`,
+                    boxShadow: bendDragging ? '0 2px 10px rgba(83, 91, 242, 0.45)' : undefined,
+                  }}
+                  onPointerDown={onBendPointerDown}
+                  onPointerMove={onBendPointerMove}
+                  onPointerUp={onBendPointerUp}
+                  onPointerCancel={onBendPointerUp}
+                  role="button"
+                  tabIndex={0}
+                />
+              ) : null}
             </>
           ) : (
-            <div
-              className={`${labelColorClass} nodrag nopan`}
-              style={{
-                transform: `translate(-50%, -50%) translate(${(sourceX + targetX) / 2}px,${(sourceY + targetY) / 2}px)`,
-              }}
-            >
-              {text}
-            </div>
+            <>
+              <div
+                className={`${labelColorClass} nodrag nopan`}
+                style={{
+                  transform: `translate(-50%, -50%) translate(${(sourceX + targetX) / 2}px,${(sourceY + targetY) / 2}px)`,
+                }}
+              >
+                {text}
+              </div>
+              {(selected || bendDragging) ? (
+                <div
+                  className="edge-bend-handle nodrag nopan"
+                  style={{
+                    transform: `translate(-50%, -50%) translate(${bendX}px,${bendY}px)`,
+                    boxShadow: bendDragging ? '0 2px 10px rgba(83, 91, 242, 0.45)' : undefined,
+                  }}
+                  onPointerDown={onBendPointerDown}
+                  onPointerMove={onBendPointerMove}
+                  onPointerUp={onBendPointerUp}
+                  onPointerCancel={onBendPointerUp}
+                  role="button"
+                  tabIndex={0}
+                />
+              ) : null}
+            </>
           )}
         </EdgeLabelRenderer>
       ) : null}

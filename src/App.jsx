@@ -1,5 +1,5 @@
 // src/App.jsx
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import ReactFlow, { MiniMap, Controls, Background, applyNodeChanges, applyEdgeChanges, addEdge, MarkerType } from 'reactflow';
 import 'reactflow/dist/style.css';
 
@@ -7,7 +7,7 @@ import Sidebar from './Sidebar.jsx';
 import './Sidebar.css';
 import CustomNode from './CustomNode.jsx'; 
 import './CustomNode.css';
-// --- 新增：引入 PlayerView 和它的样式 ---
+// --- Player view imports ---
 import PlayerView from './PlayerView.jsx';
 import './PlayerView.css';
 import SaveLoadModal from './SaveLoadModal.jsx';
@@ -26,6 +26,7 @@ import DefaultEdge from './DefaultEdge.jsx';
 import { EdgeLabelDragContext } from './EdgeLabelDragContext.js';
 import { analyzeGraph } from './analysisUtils.js';
 import { getEvaluationLogs } from './evaluationLog.js';
+import { getInitialWorldBible, sanitizeWorldBible } from './worldBibleUtils.js';
 
 const nodeTypes = { custom: CustomNode };
 const edgeTypes = { choice: ChoiceEdge, smoothstepx: SmoothStepEdge, bezierx: BezierEdge, defaultx: DefaultEdge };
@@ -187,42 +188,11 @@ const getInitialNodes = () => [
   { id: '1', type: 'custom', position: { x: 250, y: 50 }, data: { label: 'Story Start', description: '', imageUrl: '', location: '' } }
 ];
 
-const getInitialWorldBible = () => ({
-  premise: '',
-  tone: '',
-  rules: '',
-  styleGuide: '',
-  characters: [],
-  locations: [],
-});
-
 const initialNodes = JSON.parse(localStorage.getItem('storyNodes')) || getInitialNodes();
 const initialEdges = withEdgeLayout(JSON.parse(localStorage.getItem('storyEdges')) || [], initialNodes);
 const initialContext = localStorage.getItem('storyContext') || "An interactive fantasy fiction role play game. It is dusk, and there are dangerous woodland creatures around. Make each description atmospheric.";
 const initialWorldBible = JSON.parse(localStorage.getItem('worldBible')) || getInitialWorldBible();
 let nodeId = initialNodes.reduce((maxId, node) => Math.max(maxId, parseInt(node.id)), 0) + 1;
-
-const sanitizeWorldBible = (wb, fallbackWorldBible) => {
-  const base = (fallbackWorldBible && typeof fallbackWorldBible === 'object') ? fallbackWorldBible : getInitialWorldBible();
-  const src = (wb && typeof wb === 'object') ? wb : base;
-
-  const cleanList = (arr) => (Array.isArray(arr) ? arr : [])
-    .map((e) => ({
-      name: typeof e?.name === 'string' ? e.name : '',
-      description: typeof e?.description === 'string' ? e.description : '',
-    }))
-    .filter((e) => e.name.trim() || e.description.trim())
-    .slice(0, 100);
-
-  return {
-    premise: typeof src.premise === 'string' ? src.premise : '',
-    tone: typeof src.tone === 'string' ? src.tone : '',
-    rules: typeof src.rules === 'string' ? src.rules : '',
-    styleGuide: typeof src.styleGuide === 'string' ? src.styleGuide : '',
-    characters: cleanList(src.characters),
-    locations: cleanList(src.locations),
-  };
-};
 
 const sanitizeStoryData = (data, { fallbackStoryContext, fallbackWorldBible } = {}) => {
   const report = {
@@ -272,12 +242,18 @@ const sanitizeStoryData = (data, { fallbackStoryContext, fallbackWorldBible } = 
     const suggestedActions = Array.isArray(dataObj.suggestedActions)
       ? dataObj.suggestedActions.filter((a) => typeof a === 'string' && a.trim()).slice(0, 10)
       : undefined;
+    const extraData = (dataObj && typeof dataObj === 'object') ? { ...dataObj } : {};
+    delete extraData.label;
+    delete extraData.description;
+    delete extraData.imageUrl;
+    delete extraData.location;
+    delete extraData.suggestedActions;
 
     const normalized = {
       id,
       type: n?.type === 'custom' ? 'custom' : 'custom',
       position,
-      data: { label, description, imageUrl, location, ...(suggestedActions ? { suggestedActions } : {}) },
+      data: { label, description, imageUrl, location, ...(suggestedActions ? { suggestedActions } : {}), ...extraData },
     };
 
     const changed =
@@ -342,16 +318,123 @@ function App() {
   const [selectedEdge, setSelectedEdge] = useState(null);
   const [storyContext, setStoryContext] = useState(initialContext);
   const [worldBible, setWorldBible] = useState(initialWorldBible);
-  // --- 新增：管理播放状态 ---
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const raw = localStorage.getItem('sidebarWidth');
+    const n = raw ? Number(raw) : 420;
+    return Number.isFinite(n) ? Math.max(340, Math.min(700, n)) : 420;
+  });
+  // --- Player mode state ---
   const [isPlaying, setIsPlaying] = useState(false);
-  // --- 新增：管理存档模态框 ---
+  // --- Modals state ---
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const [isWorldBibleOpen, setIsWorldBibleOpen] = useState(false);
   const [isAnalysisOpen, setIsAnalysisOpen] = useState(false);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
-  const [edgeStyleMode, setEdgeStyleMode] = useState('custom');
+  const [edgeStyleMode, setEdgeStyleMode] = useState('defaultPlus');
   const autosaveTimeoutRef = useRef(null);
+  const reactFlowInstanceRef = useRef(null);
+  const reactFlowWrapperRef = useRef(null);
+
+  const attributeKeyOptions = useMemo(() => {
+    const keys = new Set();
+    const addKey = (k) => {
+      const kk = (k ?? '').toString().trim();
+      if (kk) keys.add(kk);
+    };
+    const scanConditions = (conds) => {
+      if (Array.isArray(conds)) {
+        for (const c of conds) addKey(c?.key);
+      } else if (conds && typeof conds === 'object') {
+        for (const k of Object.keys(conds)) addKey(k);
+      }
+    };
+    const scanEffects = (effs) => {
+      if (Array.isArray(effs)) {
+        for (const e of effs) addKey(e?.key);
+      } else if (effs && typeof effs === 'object') {
+        for (const k of Object.keys(effs)) addKey(k);
+      }
+    };
+    for (const n of nodes) scanEffects(n?.data?.onEnterEffects);
+    for (const e of edges) {
+      scanConditions(e?.data?.requirements);
+      scanEffects(e?.data?.effects);
+    }
+    return Array.from(keys).sort((a, b) => a.localeCompare(b));
+  }, [nodes, edges]);
+
+  const handleSidebarWidthChange = useCallback((nextWidth, persist) => {
+    const n = Number(nextWidth);
+    if (!Number.isFinite(n)) return;
+    const clamped = Math.max(340, Math.min(700, n));
+    setSidebarWidth(clamped);
+    if (persist) localStorage.setItem('sidebarWidth', String(clamped));
+  }, []);
+
+  const getViewportCenterPosition = () => {
+    const wrapper = reactFlowWrapperRef.current;
+    const rf = reactFlowInstanceRef.current;
+    if (!wrapper) return { x: 0, y: 0 };
+    const rect = wrapper.getBoundingClientRect();
+    const center = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+
+    if (rf && typeof rf.screenToFlowPosition === 'function') {
+      return rf.screenToFlowPosition(center);
+    }
+    if (rf && typeof rf.getViewport === 'function') {
+      const vp = rf.getViewport();
+      const x = (rect.width / 2 - (vp?.x || 0)) / (vp?.zoom || 1);
+      const y = (rect.height / 2 - (vp?.y || 0)) / (vp?.zoom || 1);
+      return { x, y };
+    }
+
+    return { x: 0, y: 0 };
+  };
+
+  const findFreeNodePosition = (preferred, existingNodes) => {
+    const list = Array.isArray(existingNodes) ? existingNodes : [];
+    const nodeW = 220;
+    const nodeH = 260;
+    const pad = 24;
+
+    const overlaps = (a, b) => !(
+      a.x + a.w + pad < b.x ||
+      b.x + b.w + pad < a.x ||
+      a.y + a.h + pad < b.y ||
+      b.y + b.h + pad < a.y
+    );
+
+    const isFree = (pos) => {
+      const a = { x: pos.x, y: pos.y, w: nodeW, h: nodeH };
+      for (const n of list) {
+        const p = n?.position;
+        if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+        const b = { x: p.x, y: p.y, w: nodeW, h: nodeH };
+        if (overlaps(a, b)) return false;
+      }
+      return true;
+    };
+
+    const origin = {
+      x: Math.round(Number.isFinite(preferred?.x) ? preferred.x : 0),
+      y: Math.round(Number.isFinite(preferred?.y) ? preferred.y : 0),
+    };
+    if (isFree(origin)) return origin;
+
+    const step = 80;
+    for (let i = 1; i <= 200; i += 1) {
+      const angle = i * 0.75;
+      const radius = step * Math.sqrt(i);
+      const candidate = {
+        x: Math.round(origin.x + radius * Math.cos(angle)),
+        y: Math.round(origin.y + radius * Math.sin(angle)),
+      };
+      if (isFree(candidate)) return candidate;
+    }
+
+    return origin;
+  };
 
   useEffect(() => {
     if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
@@ -386,23 +469,34 @@ function App() {
   }, [setEdges, nodes, edgeStyleMode]);
 
   const addNode = useCallback(() => {
-    const newNode = {
-      id: `${nodeId++}`,
-      type: 'custom',
-      position: { x: Math.random() * 400, y: Math.random() * 400 },
-      data: { label: `New Scene ${nodeId - 1}`, description: '', imageUrl: '', location: '' },
-    };
-    setNodes((currentNodes) => [...currentNodes, newNode]);
+    setNodes((currentNodes) => {
+      const preferred = getViewportCenterPosition();
+      const position = findFreeNodePosition(preferred, currentNodes);
+      const newNode = {
+        id: `${nodeId++}`,
+        type: 'custom',
+        position,
+        data: { label: `New Scene ${nodeId - 1}`, description: '', imageUrl: '', location: '' },
+      };
+      return [...currentNodes, newNode];
+    });
   }, []);
   
   const addNodeFromSuggestion = useCallback((sourceNodeId, actionText) => {
     const sourceNode = nodes.find(n => n.id === sourceNodeId);
     if (!sourceNode) return;
 
+    const viewportCenter = getViewportCenterPosition();
+    const sourcePreferred = { x: sourceNode.position.x, y: sourceNode.position.y + 280 };
+    const dx = (Number.isFinite(sourcePreferred.x) ? sourcePreferred.x : 0) - (Number.isFinite(viewportCenter.x) ? viewportCenter.x : 0);
+    const dy = (Number.isFinite(sourcePreferred.y) ? sourcePreferred.y : 0) - (Number.isFinite(viewportCenter.y) ? viewportCenter.y : 0);
+    const preferred = (Math.hypot(dx, dy) > 900) ? viewportCenter : sourcePreferred;
+    const position = findFreeNodePosition(preferred, nodes);
+
     const newNode = {
       id: `${nodeId++}`,
       type: 'custom',
-      position: { x: sourceNode.position.x, y: sourceNode.position.y + 250 },
+      position,
       data: { label: actionText, description: '', imageUrl: '', location: sourceNode?.data?.location || '' },
     };
 
@@ -441,18 +535,18 @@ function App() {
   const onDataChange = useCallback((newData) => {
     if (!selectedNode) return;
     
-    // 更新 nodes 状态
+    // Update nodes state
     setNodes((nds) =>
       nds.map((node) => {
         if (node.id === selectedNode.id) {
-          // 返回一个新的节点对象，而不是直接修改
+          // Return a new node object instead of mutating
           return { ...node, data: { ...node.data, ...newData } };
         }
         return node;
       })
     );
 
-    // 同时更新 selectedNode 状态，确保 Sidebar 能够接收到最新的值
+    // Also update selectedNode so Sidebar sees the latest values
     setSelectedNode((prev) => ({
       ...prev,
       data: { ...prev.data, ...newData }
@@ -466,6 +560,20 @@ function App() {
     );
     setSelectedEdge((prev) => (prev ? { ...prev, label: newLabel } : prev));
   }, [selectedEdge, setEdges]);
+
+  const onEdgeDataChange = useCallback((newData) => {
+    if (!selectedEdge) return;
+    setEdges((eds) =>
+      eds.map((edge) => (
+        edge.id === selectedEdge.id
+          ? { ...edge, data: { ...(edge.data || {}), ...newData } }
+          : edge
+      ))
+    );
+    setSelectedEdge((prev) => (
+      prev ? { ...prev, data: { ...(prev.data || {}), ...newData } } : prev
+    ));
+  }, [selectedEdge, setEdges]);
   
   const saveStory = useCallback(() => {
     localStorage.setItem('storyNodes', JSON.stringify(nodes));
@@ -475,7 +583,7 @@ function App() {
     alert('Story Saved to Browser Storage!');
   }, [nodes, edges, storyContext, worldBible]);
 
-  // --- 新增：导出为文件 ---
+  // --- Export to file ---
   const exportStory = useCallback(() => {
     const storyData = {
       nodes,
@@ -527,7 +635,7 @@ function App() {
     URL.revokeObjectURL(url);
   }, [nodes, edges, storyContext, worldBible]);
 
-  // --- 新增：从文件导入 ---
+  // --- Import from file ---
   const fileInputRef = useRef(null);
 
   const handleImportClick = () => {
@@ -602,7 +710,7 @@ function App() {
     }
   }, [selectedNode, selectedEdge, nodes, edges, setNodes, setEdges]);
 
-  // --- 新增：处理从备份加载 ---
+  // --- Load from backup ---
   const handleLoadFromBackup = useCallback((data) => {
     const sanitized = sanitizeStoryData(data, { fallbackStoryContext: storyContext, fallbackWorldBible: worldBible });
     setNodes(sanitized.nodes);
@@ -624,13 +732,13 @@ function App() {
     alert(detail ? `Backup Loaded Successfully!\n${detail}` : 'Backup Loaded Successfully!');
   }, [storyContext, worldBible]);
 
-  // --- 主渲染逻辑的改变 ---
-  // 如果处于播放模式，只渲染 PlayerView
+  // --- Main render ---
+  // When in player mode, only render PlayerView
   if (isPlaying) {
     return <PlayerView nodes={nodes} edges={edges} onExit={() => setIsPlaying(false)} initialNodeId="1" />;
   }
 
-  // 否则，渲染我们的编辑器
+  // Otherwise, render the editor UI
   const displayedEdges = edges.map((e) => {
     const type = edgeStyleMode === 'smoothstep'
       ? 'smoothstepx'
@@ -651,7 +759,7 @@ function App() {
             style={{ width: '100%', marginTop: '5px', boxSizing: 'border-box' }}
           />
         </div>
-        <div style={{ flexGrow: 1, position: 'relative' }}>
+        <div style={{ flexGrow: 1, position: 'relative' }} ref={reactFlowWrapperRef}>
           <div style={{ position: 'absolute', zIndex: 10, top: 10, left: 10, display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
             <button onClick={addNode}>Add Scene</button>
             <button onClick={saveStory} title="Save to Browser LocalStorage">Quick Save</button>
@@ -693,6 +801,7 @@ function App() {
               onPaneClick={onPaneClick}
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
+              onInit={(instance) => { reactFlowInstanceRef.current = instance; }}
               defaultEdgeOptions={{
                 type: edgeStyleMode === 'smoothstep'
                   ? 'smoothstepx'
@@ -712,8 +821,12 @@ function App() {
         onDataChange={onDataChange}
         selectedEdge={selectedEdge}
         onEdgeLabelChange={onEdgeLabelChange}
+        onEdgeDataChange={onEdgeDataChange}
         storyContext={storyContext}
         worldBible={worldBible}
+        attributeKeyOptions={attributeKeyOptions}
+        sidebarWidth={sidebarWidth}
+        onSidebarWidthChange={handleSidebarWidthChange}
         addNodeFromSuggestion={addNodeFromSuggestion}
         onDeleteElement={onDeleteElement}
       />
