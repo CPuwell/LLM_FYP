@@ -21,7 +21,7 @@ export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }
       window.clearTimeout(choiceFeedbackTimeoutRef.current);
       choiceFeedbackTimeoutRef.current = null;
     }
-  }, []);
+  }, [choiceFeedbackTimeoutRef]);
 
   useEffect(() => {
     if (!nodes || nodes.length === 0) return;
