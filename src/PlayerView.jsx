@@ -10,6 +10,7 @@ export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }
   const [usedChoiceIds, setUsedChoiceIds] = useState(() => new Set());
   const [attributes, setAttributes] = useState({});
   const [appliedNodeEffectIds, setAppliedNodeEffectIds] = useState(() => new Set());
+  const [choiceFeedback, setChoiceFeedback] = useState(null);
 
   const [currentNode, setCurrentNode] = useState(null);
   const [currentChoices, setCurrentChoices] = useState([]);
@@ -22,6 +23,7 @@ export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }
     setUsedChoiceIds(new Set());
     setAttributes({});
     setAppliedNodeEffectIds(new Set());
+    setChoiceFeedback(null);
   }, [initialNodeId, nodes]);
 
   // Update currentNode and currentChoices whenever currentNodeId changes
@@ -58,12 +60,33 @@ export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }
     });
   }, [currentNodeId, nodes]);
 
+  const getChoiceDisabledReason = (edge) => {
+    if (!edge) return null;
+    const locked = !evaluateConditions(attributes, edge?.data?.requirements);
+    if (locked) return 'locked';
+    const isSingleUse = Boolean(edge?.data?.singleUse);
+    if (isSingleUse && usedChoiceIds.has(edge.id)) return 'used';
+    return null;
+  };
+
+  const showChoiceFeedback = (reason) => {
+    if (!reason) return;
+    const msg = reason === 'used'
+      ? 'This choice can only be selected once.'
+      : 'This choice is locked.';
+    setChoiceFeedback(msg);
+    window.clearTimeout(showChoiceFeedback._t);
+    showChoiceFeedback._t = window.setTimeout(() => setChoiceFeedback(null), 1800);
+  };
+
   const handleChoiceClick = (edge) => {
     if (!edge) return;
-    const locked = !evaluateConditions(attributes, edge?.data?.requirements);
-    if (locked) return;
+    const reason = getChoiceDisabledReason(edge);
+    if (reason) {
+      showChoiceFeedback(reason);
+      return;
+    }
     const isSingleUse = Boolean(edge?.data?.singleUse);
-    if (isSingleUse && usedChoiceIds.has(edge.id)) return;
     if (isSingleUse) {
       setUsedChoiceIds((prev) => {
         const next = new Set(prev);
@@ -94,6 +117,7 @@ export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }
     setUsedChoiceIds(new Set());
     setAttributes({});
     setAppliedNodeEffectIds(new Set());
+    setChoiceFeedback(null);
     setCurrentNodeId(exists ? initialNodeId : nodes[0].id);
   };
 
@@ -129,6 +153,11 @@ export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }
       </div>
       <button onClick={onExit} className="exit-button">Exit Player Mode</button>
       <div className="player-container">
+        {choiceFeedback ? (
+          <div className="player-feedback" role="status" aria-live="polite">
+            {choiceFeedback}
+          </div>
+        ) : null}
         {currentNode.data.imageUrl && (
           <img src={getDisplayImageUrl(currentNode.data.imageUrl)} alt={currentNode.data.label} className="player-image" />
         )}
@@ -138,16 +167,15 @@ export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }
         <div className="player-choices">
           {currentChoices.length > 0 ? (
             currentChoices.map((edge) => {
-              const locked = !evaluateConditions(attributes, edge?.data?.requirements);
-              const usedUp = Boolean(edge?.data?.singleUse) && usedChoiceIds.has(edge.id);
-              const disabled = locked || usedUp;
-              const title = locked ? 'Locked' : undefined;
+              const reason = getChoiceDisabledReason(edge);
+              const disabled = Boolean(reason);
+              const title = reason === 'used' ? 'Already used' : (reason === 'locked' ? 'Locked' : undefined);
               return (
                 <button
                   key={edge.id}
                   onClick={() => handleChoiceClick(edge)}
-                  className="player-choice-button"
-                  disabled={disabled}
+                  className={disabled ? 'player-choice-button is-disabled' : 'player-choice-button'}
+                  aria-disabled={disabled}
                   title={title}
                 >
                   {edge.label}

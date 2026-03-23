@@ -1,0 +1,181 @@
+{
+  "storyContext": "Demo: test attributes, requirements/effects, and single-use choices.",
+  "worldBible": {
+    "premise": "A short demo story for feature testing.",
+    "tone": "Neutral",
+    "rules": "",
+    "styleGuide": "",
+    "characters": [
+      { "name": "Protagonist", "description": "A traveler with mutable attributes." }
+    ],
+    "locations": [
+      { "name": "Ruins", "description": "Collapsed stonework, dust, and hidden items." },
+      { "name": "Gate", "description": "An old iron gate with a rusted lock." },
+      { "name": "Forest", "description": "Thick woods with lurking danger." }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "1",
+      "type": "custom",
+      "position": { "x": 0, "y": 0 },
+      "data": {
+        "label": "Story Start",
+        "description": "You stand at a crossroads: ruins to the west, a locked gate to the east, and a dark forest ahead.",
+        "imageUrl": "",
+        "location": "",
+        "onEnterEffects": [
+          { "key": "health", "op": "set", "value": 10 },
+          { "key": "injured", "op": "set", "value": false },
+          { "key": "hasKey", "op": "unset" }
+        ]
+      }
+    },
+    {
+      "id": "2",
+      "type": "custom",
+      "position": { "x": -380, "y": 40 },
+      "data": {
+        "label": "Ruins",
+        "description": "You search the ruins. Under a loose stone, you find a small iron key.",
+        "imageUrl": "",
+        "location": "Ruins",
+        "onEnterEffects": [
+          { "key": "hasKey", "op": "set", "value": true }
+        ]
+      }
+    },
+    {
+      "id": "3",
+      "type": "custom",
+      "position": { "x": 420, "y": 40 },
+      "data": {
+        "label": "Locked Gate",
+        "description": "A rusted iron gate blocks the path. The lock looks fragile, but the hinges are old.",
+        "imageUrl": "",
+        "location": "Gate"
+      }
+    },
+    {
+      "id": "4",
+      "type": "custom",
+      "position": { "x": 60, "y": 320 },
+      "data": {
+        "label": "Forest",
+        "description": "Branches claw at your arms. Something moves in the shadows.",
+        "imageUrl": "",
+        "location": "Forest"
+      }
+    },
+    {
+      "id": "5",
+      "type": "custom",
+      "position": { "x": 420, "y": 320 },
+      "data": {
+        "label": "End",
+        "description": "Demo end. Restart and try a different path.",
+        "imageUrl": "",
+        "location": ""
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "1",
+      "target": "2",
+      "label": "Search the ruins (get key)",
+      "type": "defaultx",
+      "data": {}
+    },
+    {
+      "id": "e2",
+      "source": "2",
+      "target": "1",
+      "label": "Return to crossroads",
+      "type": "defaultx",
+      "data": {}
+    },
+    {
+      "id": "e3",
+      "source": "1",
+      "target": "3",
+      "label": "Try the locked gate (needs key)",
+      "type": "defaultx",
+      "data": {
+        "requirements": [
+          { "key": "hasKey", "op": "truthy" }
+        ]
+      }
+    },
+    {
+      "id": "e4",
+      "source": "3",
+      "target": "5",
+      "label": "Open the gate (consume key) [single-use]",
+      "type": "defaultx",
+      "data": {
+        "singleUse": true,
+        "requirements": [
+          { "key": "hasKey", "op": "truthy" }
+        ],
+        "effects": [
+          { "key": "hasKey", "op": "unset" }
+        ]
+      }
+    },
+    {
+      "id": "e5",
+      "source": "1",
+      "target": "4",
+      "label": "Enter the forest (get injured, -3 health)",
+      "type": "defaultx",
+      "data": {
+        "effects": [
+          { "key": "injured", "op": "set", "value": true },
+          { "key": "health", "op": "dec", "value": 3 }
+        ]
+      }
+    },
+    {
+      "id": "e6",
+      "source": "4",
+      "target": "1",
+      "label": "Return carefully (only if not injured)",
+      "type": "defaultx",
+      "data": {
+        "requirements": [
+          { "key": "injured", "op": "falsy" }
+        ]
+      }
+    },
+    {
+      "id": "e7",
+      "source": "4",
+      "target": "1",
+      "label": "Rest (heal) (only if injured)",
+      "type": "defaultx",
+      "data": {
+        "requirements": [
+          { "key": "injured", "op": "truthy" }
+        ],
+        "effects": [
+          { "key": "injured", "op": "set", "value": false }
+        ]
+      }
+    },
+    {
+      "id": "e8",
+      "source": "1",
+      "target": "1",
+      "label": "Drink potion (+5 health) [single-use]",
+      "type": "defaultx",
+      "data": {
+        "singleUse": true,
+        "effects": [
+          { "key": "health", "op": "inc", "value": 5 }
+        ]
+      }
+    }
+  ]
+}
