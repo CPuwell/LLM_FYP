@@ -1,5 +1,5 @@
 // src/PlayerView.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './PlayerView.css'; 
 import { getDisplayImageUrl } from './imageUtils.js';
 import { applyEffects, evaluateConditions } from './attributeEngine.js';
@@ -11,9 +11,17 @@ export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }
   const [attributes, setAttributes] = useState({});
   const [appliedNodeEffectIds, setAppliedNodeEffectIds] = useState(() => new Set());
   const [choiceFeedback, setChoiceFeedback] = useState(null);
+  const choiceFeedbackTimeoutRef = useRef(null);
 
   const [currentNode, setCurrentNode] = useState(null);
   const [currentChoices, setCurrentChoices] = useState([]);
+
+  useEffect(() => () => {
+    if (choiceFeedbackTimeoutRef.current) {
+      window.clearTimeout(choiceFeedbackTimeoutRef.current);
+      choiceFeedbackTimeoutRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (!nodes || nodes.length === 0) return;
@@ -24,6 +32,10 @@ export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }
     setAttributes({});
     setAppliedNodeEffectIds(new Set());
     setChoiceFeedback(null);
+    if (choiceFeedbackTimeoutRef.current) {
+      window.clearTimeout(choiceFeedbackTimeoutRef.current);
+      choiceFeedbackTimeoutRef.current = null;
+    }
   }, [initialNodeId, nodes]);
 
   // Update currentNode and currentChoices whenever currentNodeId changes
@@ -75,8 +87,11 @@ export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }
       ? 'This choice can only be selected once.'
       : 'This choice is locked.';
     setChoiceFeedback(msg);
-    window.clearTimeout(showChoiceFeedback._t);
-    showChoiceFeedback._t = window.setTimeout(() => setChoiceFeedback(null), 1800);
+    if (choiceFeedbackTimeoutRef.current) {
+      window.clearTimeout(choiceFeedbackTimeoutRef.current);
+      choiceFeedbackTimeoutRef.current = null;
+    }
+    choiceFeedbackTimeoutRef.current = window.setTimeout(() => setChoiceFeedback(null), 1800);
   };
 
   const handleChoiceClick = (edge) => {
@@ -118,6 +133,10 @@ export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }
     setAttributes({});
     setAppliedNodeEffectIds(new Set());
     setChoiceFeedback(null);
+    if (choiceFeedbackTimeoutRef.current) {
+      window.clearTimeout(choiceFeedbackTimeoutRef.current);
+      choiceFeedbackTimeoutRef.current = null;
+    }
     setCurrentNodeId(exists ? initialNodeId : nodes[0].id);
   };
 
