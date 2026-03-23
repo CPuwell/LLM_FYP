@@ -1,0 +1,102 @@
+/* src/PlayerView.css */
+.player-view {
+  width: 100vw;
+  height: 100vh;
+  background-color: #333;
+  color: white;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-family: sans-serif;
+  overflow: auto;
+}
+
+.player-container {
+  max-width: 800px;
+  width: 90%;
+  background-color: #444;
+  border-radius: 8px;
+  padding: 30px;
+  box-shadow: 0 10px 20px rgba(0,0,0,0.5);
+  text-align: center;
+}
+
+.exit-button {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  padding: 10px 15px;
+  background: #666;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.player-controls {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  display: flex;
+  gap: 10px;
+}
+
+.player-control-button {
+  padding: 10px 15px;
+  background: #666;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.player-control-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.player-image {
+  max-width: 100%;
+  max-height: 400px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+}
+
+.player-title {
+  margin-top: 0;
+  font-size: 2.5em;
+}
+
+.player-description {
+  font-size: 1.1em;
+  line-height: 1.6;
+  white-space: pre-wrap; /* 保持换行符 */
+}
+
+.player-choices {
+  margin-top: 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.player-choice-button {
+  width: 100%;
+  padding: 15px;
+  font-size: 1.2em;
+  background-color: #5a5a5a;
+  color: white;
+  border: 1px solid #777;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.player-choice-button:hover {
+  background-color: #6a6a6a;
+}
+
+.end-of-story {
+  font-style: italic;
+  color: #999;
+}

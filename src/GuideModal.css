@@ -1,0 +1,49 @@
+.guide-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1300;
+}
+
+.guide-modal {
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  width: 760px;
+  max-width: 95%;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.guide-body {
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.guide-body h3 {
+  margin: 14px 0 8px 0;
+  font-size: 16px;
+}
+
+.guide-body ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.guide-body li {
+  color: #222;
+  font-size: 13px;
+  line-height: 1.4;
+}
+

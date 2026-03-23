@@ -1,0 +1,225 @@
+/* src/Sidebar.css */
+.sidebar {
+  position: relative;
+  width: 420px;
+  height: 100%;
+  background: #f7f7f7;
+  border-left: 1px solid #ddd;
+  padding: 18px;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+
+.sidebar h3 {
+  margin-top: 0;
+  margin-bottom: 10px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.sidebar label {
+  display: block;
+  margin-top: 10px;
+  margin-bottom: 5px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+}
+
+.sidebar input {
+  width: 100%;
+  padding: 10px 10px;
+  box-sizing: border-box;
+  border: 1px solid #cfcfcf;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.sidebar-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.sidebar input.sidebar-checkbox {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  border-radius: 4px;
+}
+
+.sidebar label.sidebar-checkbox-label {
+  display: inline-block;
+  margin: 0;
+  font-weight: 600;
+}
+
+.sidebar select {
+  width: 100%;
+  padding: 10px 10px;
+  box-sizing: border-box;
+  border: 1px solid #cfcfcf;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.sidebar textarea {
+  width: 100%;
+  padding: 10px 10px;
+  box-sizing: border-box;
+  border: 1px solid #cfcfcf;
+  border-radius: 8px;
+  background: #fff;
+  resize: vertical;
+  font-size: 15px;
+}
+
+.input-with-button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.input-with-button input {
+  flex: 1 1 auto;
+}
+
+.generate-btn-small {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 10px;
+  font-size: 16px;
+}
+
+.description-header {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.generate-btn {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.suggestions-container {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid #dedede;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.suggestions-container h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+}
+
+.suggestions-container ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.suggestions-container li {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 8px 0;
+}
+
+.suggestions-container li span {
+  flex: 1 1 auto;
+  font-size: 15px;
+  color: #222;
+}
+
+.suggestions-container li button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 10px;
+  font-weight: 700;
+}
+
+.sidebar-separator {
+  border-top: 1px solid #ddd;
+  margin: 20px 0;
+}
+
+.delete-btn {
+  width: 100%;
+  padding: 10px;
+  background-color: #ff4d4d;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 14px;
+}
+
+.delete-btn:hover {
+  background-color: #cc0000;
+}
+
+.attr-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.attr-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 0.9fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.attr-row input,
+.attr-row select {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.attr-row .attr-remove {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 10px;
+  font-weight: 700;
+}
+
+.attr-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.attr-add {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.sidebar-resizer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  background: transparent;
+}
+
+.sidebar-resizer:hover {
+  background: rgba(0, 0, 0, 0.05);
+}

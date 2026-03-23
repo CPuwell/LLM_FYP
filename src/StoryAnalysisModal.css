@@ -1,0 +1,112 @@
+.story-analysis-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1200;
+}
+
+.story-analysis-modal {
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  width: 860px;
+  max-width: 96%;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.story-analysis-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+.copy-btn {
+  background-color: #2196f3;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.story-analysis-body {
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.story-analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.story-analysis-kv {
+  border: 1px solid #eee;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fafafa;
+}
+
+.story-analysis-kv .k {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.story-analysis-kv .v {
+  font-size: 16px;
+  font-weight: 700;
+  color: #222;
+}
+
+.story-analysis-section {
+  margin-top: 16px;
+}
+
+.story-analysis-section h3 {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+}
+
+.story-analysis-empty {
+  color: #777;
+  font-size: 13px;
+  padding: 8px 0;
+}
+
+.story-analysis-list {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.story-analysis-list li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.story-analysis-list .id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  color: #333;
+  min-width: 60px;
+}
+
+.story-analysis-list .label {
+  font-size: 13px;
+  color: #222;
+}
+
