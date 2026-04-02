@@ -34,6 +34,9 @@ export const normalizeConditions = (value) => {
       .filter((c) => isPlainObject(c) && typeof c.key === 'string' && c.key.trim())
       .map((c) => ({ key: c.key.trim(), op: normalizeOp(c.op), value: c.value }));
   }
+  if (isPlainObject(value) && Array.isArray(value.conditions)) {
+    return normalizeConditions(value.conditions);
+  }
   if (isPlainObject(value)) {
     return Object.entries(value)
       .filter(([k]) => typeof k === 'string' && k.trim())
@@ -42,47 +45,69 @@ export const normalizeConditions = (value) => {
   return [];
 };
 
-export const evaluateConditions = (attributes, conditions) => {
+const normalizeRequirementExpr = (value) => {
+  if (!value) return null;
+
+  if (Array.isArray(value)) {
+    return { type: 'all', items: normalizeConditions(value) };
+  }
+
+  if (isPlainObject(value)) {
+    if (Array.isArray(value.any) || Array.isArray(value.all)) {
+      const anyList = Array.isArray(value.any) ? value.any : null;
+      const allList = Array.isArray(value.all) ? value.all : null;
+      if (anyList) return { type: 'any', items: normalizeConditions(anyList) };
+      if (allList) return { type: 'all', items: normalizeConditions(allList) };
+    }
+
+    const modeRaw = (value.mode ?? value.logic ?? '').toString().trim().toLowerCase();
+    const mode = modeRaw === 'any' || modeRaw === 'or' ? 'any' : (modeRaw === 'all' || modeRaw === 'and' ? 'all' : '');
+    if (mode && Array.isArray(value.conditions)) {
+      return { type: mode, items: normalizeConditions(value.conditions) };
+    }
+
+    return { type: 'all', items: normalizeConditions(value) };
+  }
+
+  return null;
+};
+
+const evaluateCondition = (attributes, c) => {
   const attrs = (attributes && typeof attributes === 'object') ? attributes : {};
-  const conds = normalizeConditions(conditions);
-  for (const c of conds) {
-    const actual = getByPath(attrs, c.key);
-    const op = normalizeOp(c.op);
-    if (op === 'exists') {
-      if (actual === undefined) return false;
-      continue;
-    }
-    if (op === '!exists') {
-      if (actual !== undefined) return false;
-      continue;
-    }
-    if (op === 'truthy') {
-      if (!actual) return false;
-      continue;
-    }
-    if (op === 'falsy') {
-      if (actual) return false;
-      continue;
-    }
-    if (op === '==') {
-      if (actual !== c.value) return false;
-      continue;
-    }
-    if (op === '!=') {
-      if (actual === c.value) return false;
-      continue;
-    }
-    if (op === '>' || op === '>=' || op === '<' || op === '<=') {
-      const a = typeof actual === 'number' ? actual : Number(actual);
-      const b = typeof c.value === 'number' ? c.value : Number(c.value);
-      if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
-      if (op === '>' && !(a > b)) return false;
-      if (op === '>=' && !(a >= b)) return false;
-      if (op === '<' && !(a < b)) return false;
-      if (op === '<=' && !(a <= b)) return false;
-      continue;
+  const actual = getByPath(attrs, c.key);
+  const op = normalizeOp(c.op);
+  if (op === 'exists') return actual !== undefined;
+  if (op === '!exists') return actual === undefined;
+  if (op === 'truthy') return Boolean(actual);
+  if (op === 'falsy') return !actual;
+  if (op === '==') return actual === c.value;
+  if (op === '!=') return actual !== c.value;
+  if (op === '>' || op === '>=' || op === '<' || op === '<=') {
+    const a = typeof actual === 'number' ? actual : Number(actual);
+    const b = typeof c.value === 'number' ? c.value : Number(c.value);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+    if (op === '>' && !(a > b)) return false;
+    if (op === '>=' && !(a >= b)) return false;
+    if (op === '<' && !(a < b)) return false;
+    if (op === '<=' && !(a <= b)) return false;
+    return true;
+  }
+  return false;
+};
+
+export const evaluateConditions = (attributes, conditions) => {
+  const expr = normalizeRequirementExpr(conditions);
+  if (!expr) return true;
+  const items = Array.isArray(expr.items) ? expr.items : [];
+  if (items.length === 0) return true;
+  if (expr.type === 'any') {
+    for (const c of items) {
+      if (evaluateCondition(attributes, c)) return true;
     }
     return false;
+  }
+  for (const c of items) {
+    if (!evaluateCondition(attributes, c)) return false;
   }
   return true;
 };
@@ -142,4 +167,3 @@ export const applyEffects = (attributes, effects) => {
   }
   return next;
 };
-

@@ -2,13 +2,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { getDisplayImageUrl } from './imageUtils.js';
 import { appendEvaluationLog } from './evaluationLog.js';
+import { getStoryMemory, selectFactsForScene } from './storyMemory.js';
 
 // accept new prop: onDeleteElement
 export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEdgeLabelChange, onEdgeDataChange, storyContext, worldBible, attributeKeyOptions, sidebarWidth, onSidebarWidthChange, addNodeFromSuggestion, onDeleteElement }) {
   const [isTextLoading, setIsTextLoading] = useState(false);
   const [isImageLoading, setIsImageLoading] = useState(false);
+  const [isPlayerPreviewLoading, setIsPlayerPreviewLoading] = useState(false);
+  const [playerPreviewText, setPlayerPreviewText] = useState('');
+  const [playerPreviewAttributesRaw, setPlayerPreviewAttributesRaw] = useState(() => localStorage.getItem('playerPreviewAttributes') || '{}');
   const [nodeOnEnterEffects, setNodeOnEnterEffects] = useState([]);
   const [edgeRequirements, setEdgeRequirements] = useState([]);
+  const [edgeRequirementsMode, setEdgeRequirementsMode] = useState('all');
   const [edgeEffects, setEdgeEffects] = useState([]);
   const resizeRef = useRef(null);
   const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
@@ -27,13 +32,25 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
     } else {
       setNodeOnEnterEffects([]);
     }
+    setPlayerPreviewText('');
   }, [selectedNode?.id]);
 
   useEffect(() => {
     if (selectedEdge) {
       const r = selectedEdge?.data?.requirements;
       const e = selectedEdge?.data?.effects;
-      setEdgeRequirements(Array.isArray(r) ? r.map((c) => ({
+      const mode = (r && typeof r === 'object' && !Array.isArray(r) && Array.isArray(r.any)) ? 'any' : 'all';
+      const conds = Array.isArray(r)
+        ? r
+        : (r && typeof r === 'object' && !Array.isArray(r) && Array.isArray(r.any))
+          ? r.any
+          : (r && typeof r === 'object' && !Array.isArray(r) && Array.isArray(r.all))
+            ? r.all
+            : (r && typeof r === 'object' && !Array.isArray(r) && Array.isArray(r.conditions))
+              ? r.conditions
+              : [];
+      setEdgeRequirementsMode(mode);
+      setEdgeRequirements(Array.isArray(conds) ? conds.map((c) => ({
         key: typeof c?.key === 'string' ? c.key : '',
         op: typeof c?.op === 'string' ? c.op : 'truthy',
         valueKind: (typeof c?.value === 'boolean') ? 'boolean' : (typeof c?.value === 'number' ? 'number' : 'text'),
@@ -47,6 +64,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
       })) : []);
     } else {
       setEdgeRequirements([]);
+      setEdgeRequirementsMode('all');
       setEdgeEffects([]);
     }
   }, [selectedEdge?.id]);
@@ -92,7 +110,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
     onDataChange({ onEnterEffects: clean.length ? clean : undefined });
   };
 
-  const commitEdgeReqs = (list) => {
+  const commitEdgeReqs = (list, mode) => {
     if (!onEdgeDataChange) return;
     const clean = list
       .filter((r) => typeof r?.key === 'string' && r.key.trim())
@@ -102,7 +120,12 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
         const kind = r?.valueKind === 'number' ? 'number' : (r?.valueKind === 'boolean' ? 'boolean' : 'text');
         return { key: r.key.trim(), op, value: normalizeValueByKind(kind, r.value) };
       });
-    onEdgeDataChange({ requirements: clean.length ? clean : undefined });
+    const m = mode === 'any' ? 'any' : 'all';
+    if (!clean.length) {
+      onEdgeDataChange({ requirements: undefined });
+      return;
+    }
+    onEdgeDataChange({ requirements: m === 'any' ? { any: clean } : clean });
   };
 
   const commitEdgeEffs = (list) => {
@@ -121,22 +144,27 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
   const handleTextGenerate = async () => {  
     setIsTextLoading(true);
     const startedAt = performance.now();
+    const memory = getStoryMemory();
+    const selectedFacts = selectFactsForScene(memory, { title: selectedNode.data.label, location: selectedNode?.data?.location || '', limit: 8 });
     const requestBody = { 
       title: selectedNode.data.label, 
       storyContext: storyContext,
-      userPrompt: selectedNode.data.description,
+      userPrompt: selectedNode.data.setting || '',
       worldBible: worldBible,
-      location: selectedNode?.data?.location || ''
+      location: selectedNode?.data?.location || '',
+      memory: { summary: memory.summary, facts: selectedFacts }
     };
     appendEvaluationLog({
       type: 'ai_generate_text_start',
       nodeId: selectedNode.id,
       title: selectedNode.data.label,
       storyContextLength: (storyContext || '').length,
-      userPromptLength: (selectedNode.data.description || '').length,
+      userPromptLength: (selectedNode.data.setting || '').length,
       worldBibleCharactersCount: Array.isArray(worldBible?.characters) ? worldBible.characters.length : 0,
       worldBibleLocationsCount: Array.isArray(worldBible?.locations) ? worldBible.locations.length : 0,
       location: selectedNode?.data?.location || '',
+      memorySummaryLength: (memory.summary || '').length,
+      memoryFactsCount: Array.isArray(selectedFacts) ? selectedFacts.length : 0,
     });
     try {
       const response = await fetch(`${apiBaseUrl}/api/generate`, {
@@ -184,6 +212,71 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
       alert(friendlyMessage);
     } finally {
       setIsTextLoading(false);
+    }
+  };
+
+  const handlePlayerPreviewGenerate = async () => {
+    const startedAt = performance.now();
+    let attrs = {};
+    try {
+      const parsed = JSON.parse(playerPreviewAttributesRaw || '{}');
+      attrs = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+    } catch {
+      alert('Preview attributes must be valid JSON object, e.g. {"hp":10,"hasKey":true}');
+      return;
+    }
+
+    setIsPlayerPreviewLoading(true);
+    const memory = getStoryMemory();
+    const selectedFacts = selectFactsForScene(memory, { title: selectedNode.data.label, location: selectedNode?.data?.location || '', limit: 8 });
+    appendEvaluationLog({
+      type: 'ai_preview_player_text_start',
+      nodeId: selectedNode.id,
+      title: selectedNode.data.label,
+      location: selectedNode?.data?.location || '',
+      durationMs: 0,
+      memorySummaryLength: (memory.summary || '').length,
+      memoryFactsCount: Array.isArray(selectedFacts) ? selectedFacts.length : 0,
+    });
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/generate-player`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: selectedNode.data.label,
+          storyContext,
+          userPrompt: selectedNode.data.setting || '',
+          worldBible,
+          location: selectedNode?.data?.location || '',
+          memory: { summary: memory.summary, facts: selectedFacts },
+          attributes: attrs,
+        }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        appendEvaluationLog({
+          type: 'ai_preview_player_text_error',
+          nodeId: selectedNode.id,
+          title: selectedNode.data.label,
+          status: response.status,
+          durationMs: Math.round(performance.now() - startedAt),
+          error: errorData.details || errorData.error || 'Network response was not ok',
+        });
+        throw new Error(errorData.details || errorData.error || 'Network response was not ok');
+      }
+      const data = await response.json();
+      setPlayerPreviewText(typeof data?.description === 'string' ? data.description : '');
+      appendEvaluationLog({
+        type: 'ai_preview_player_text_success',
+        nodeId: selectedNode.id,
+        title: selectedNode.data.label,
+        durationMs: Math.round(performance.now() - startedAt),
+        model: data?.meta?.model || '',
+      });
+    } catch (e) {
+      alert(`Preview generation failed: ${e?.message || 'Unknown error'}`);
+    } finally {
+      setIsPlayerPreviewLoading(false);
     }
   };
 
@@ -273,6 +366,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
   };
 
   if (selectedNode) {
+    const dynamicDescriptionEnabled = selectedNode?.data?.dynamicDescriptionEnabled !== false;
     return (
       <aside className="sidebar" style={{ width: Number.isFinite(sidebarWidth) ? `${sidebarWidth}px` : undefined }}>
         <div
@@ -306,6 +400,22 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
         </div>
         {selectedNode.data.imageUrl && <img src={getDisplayImageUrl(selectedNode.data.imageUrl)} alt="Preview" style={{ width: '100%', marginTop: '10px', borderRadius: '4px' }} />}
 
+        <label>Setting:</label>
+        <textarea
+          name="setting"
+          rows="5"
+          value={selectedNode.data.setting || ''}
+          onChange={handleNodeDataChange}
+          placeholder="Author intent, constraints, must-happen beats, state-based rules..."
+        />
+
+        <label>Dynamic Description (Player Mode):</label>
+        <input
+          type="checkbox"
+          checked={dynamicDescriptionEnabled}
+          onChange={(e) => onDataChange({ dynamicDescriptionEnabled: e.target.checked })}
+        />
+
         <label>Description:</label>
         <div className="description-header">
           <button onClick={handleTextGenerate} disabled={isTextLoading} className="generate-btn">
@@ -313,6 +423,24 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
           </button>
         </div>
         <textarea name="description" rows="8" value={selectedNode.data.description || ''} onChange={handleNodeDataChange} />
+
+        <label>Player Preview Attributes (JSON):</label>
+        <textarea
+          rows="3"
+          value={playerPreviewAttributesRaw}
+          onChange={(e) => {
+            const v = e.target.value;
+            setPlayerPreviewAttributesRaw(v);
+            try { localStorage.setItem('playerPreviewAttributes', v); } catch { }
+          }}
+          placeholder='{"hp":10,"hasKey":true}'
+        />
+        <button onClick={handlePlayerPreviewGenerate} disabled={!dynamicDescriptionEnabled || isPlayerPreviewLoading} className="generate-btn">
+          {isPlayerPreviewLoading ? 'Previewing...' : '👁 Preview Player Description'}
+        </button>
+        {playerPreviewText ? (
+          <textarea rows="6" value={playerPreviewText} readOnly />
+        ) : null}
 
         <datalist id="attr-keys">
           {attributeKeys.map((k) => (
@@ -498,6 +626,17 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
         </datalist>
 
         <label>Requirements:</label>
+        <select
+          value={edgeRequirementsMode}
+          onChange={(e) => {
+            const nextMode = e.target.value === 'any' ? 'any' : 'all';
+            setEdgeRequirementsMode(nextMode);
+            commitEdgeReqs(edgeRequirements, nextMode);
+          }}
+        >
+          <option value="all">Match ALL (AND)</option>
+          <option value="any">Match ANY (OR)</option>
+        </select>
         <div className="attr-list">
           {edgeRequirements.map((row, idx) => {
             const op = typeof row?.op === 'string' ? row.op : 'truthy';
@@ -514,7 +653,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
                   onChange={(e) => {
                     const next = edgeRequirements.map((r, i) => (i === idx ? { ...r, key: e.target.value } : r));
                     setEdgeRequirements(next);
-                    commitEdgeReqs(next);
+                    commitEdgeReqs(next, edgeRequirementsMode);
                   }}
                   placeholder="key"
                 />
@@ -524,7 +663,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
                     const nextOp = e.target.value;
                     const next = edgeRequirements.map((r, i) => (i === idx ? { ...r, op: nextOp, valueKind: (nextOp === '>' || nextOp === '>=' || nextOp === '<' || nextOp === '<=') ? 'number' : r.valueKind } : r));
                     setEdgeRequirements(next);
-                    commitEdgeReqs(next);
+                    commitEdgeReqs(next, edgeRequirementsMode);
                   }}
                 >
                   <option value="truthy">is true</option>
@@ -548,7 +687,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
                           const nextVal = nextKind === 'boolean' ? Boolean(row?.value) : (nextKind === 'number' ? Number(row?.value ?? 0) : `${row?.value ?? ''}`);
                           const next = edgeRequirements.map((r, i) => (i === idx ? { ...r, valueKind: nextKind, value: nextVal } : r));
                           setEdgeRequirements(next);
-                          commitEdgeReqs(next);
+                          commitEdgeReqs(next, edgeRequirementsMode);
                         }}
                       >
                         <option value="boolean">Bool</option>
@@ -563,7 +702,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
                         onChange={(e) => {
                           const next = edgeRequirements.map((r, i) => (i === idx ? { ...r, value: e.target.checked, valueKind: 'boolean' } : r));
                           setEdgeRequirements(next);
-                          commitEdgeReqs(next);
+                          commitEdgeReqs(next, edgeRequirementsMode);
                         }}
                         style={{ width: 18, height: 18 }}
                       />
@@ -576,7 +715,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
                           const nextValue = condKind === 'number' ? Number(raw) : raw;
                           const next = edgeRequirements.map((r, i) => (i === idx ? { ...r, value: nextValue, valueKind: condKind } : r));
                           setEdgeRequirements(next);
-                          commitEdgeReqs(next);
+                          commitEdgeReqs(next, edgeRequirementsMode);
                         }}
                         placeholder={condKind === 'number' ? '0' : 'value'}
                       />
@@ -591,7 +730,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
                   onClick={() => {
                     const next = edgeRequirements.filter((_, i) => i !== idx);
                     setEdgeRequirements(next);
-                    commitEdgeReqs(next);
+                    commitEdgeReqs(next, edgeRequirementsMode);
                   }}
                 >
                   ×
@@ -607,7 +746,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
             onClick={() => {
               const next = [...edgeRequirements, { key: '', op: 'truthy', valueKind: 'boolean', value: true }];
               setEdgeRequirements(next);
-              commitEdgeReqs(next);
+              commitEdgeReqs(next, edgeRequirementsMode);
             }}
           >
             + Add Condition

@@ -735,7 +735,7 @@ function App() {
   // --- Main render ---
   // When in player mode, only render PlayerView
   if (isPlaying) {
-    return <PlayerView nodes={nodes} edges={edges} onExit={() => setIsPlaying(false)} initialNodeId="1" />;
+    return <PlayerView nodes={nodes} edges={edges} storyContext={storyContext} worldBible={worldBible} onExit={() => setIsPlaying(false)} initialNodeId="1" />;
   }
 
   // Otherwise, render the editor UI

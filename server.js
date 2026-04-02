@@ -1,11 +1,14 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { createGeminiClient, generateSceneText } from './server/llm.js';
+import { validateGenerateRequest } from './server/validate.js';
+import { updateLongTermMemory } from './server/memory.js';
+import { fetchProxiedImage } from './server/proxyImage.js';
 
 dotenv.config();
 
@@ -51,218 +54,86 @@ if (!apiKey) {
   console.error("❌ Error: GEMINI_API_KEY is missing in .env file");
 }
 
-const genAI = apiKey
-  ? new GoogleGenerativeAI(apiKey)
-  : null;
-
-const parseModelJson = (rawText) => {
-  const cleaned = (rawText ?? '')
-    .toString()
-    .replace(/```json/gi, '')
-    .replace(/```/g, '')
-    .trim();
-
-  const normalize = (obj) => {
-    const description = typeof obj?.description === 'string' ? obj.description : '';
-    const actions = Array.isArray(obj?.actions)
-      ? obj.actions.filter((a) => typeof a === 'string' && a.trim()).slice(0, 3)
-      : [];
-    if (!description.trim()) throw new Error('Missing description');
-    if (actions.length === 0) throw new Error('Missing actions');
-    return { description, actions };
-  };
-
-  try {
-    return normalize(JSON.parse(cleaned));
-  } catch {
-  }
-
-  const first = cleaned.indexOf('{');
-  const last = cleaned.lastIndexOf('}');
-  if (first !== -1 && last !== -1 && last > first) {
-    try {
-      return normalize(JSON.parse(cleaned.slice(first, last + 1)));
-    } catch {
-    }
-  }
-
-  const descMatch = cleaned.match(/"description"\s*:\s*"([\s\S]*?)"\s*,/i);
-  const actionsMatch = cleaned.match(/"actions"\s*:\s*\[([\s\S]*?)\]/i);
-  if (descMatch && actionsMatch) {
-    const description = descMatch[1].replace(/\\"/g, '"').trim();
-    const items = actionsMatch[1]
-      .split(',')
-      .map((s) => s.trim().replace(/^"+|"+$/g, '').replace(/\\"/g, '"'))
-      .filter((s) => s.trim())
-      .slice(0, 3);
-    if (description && items.length) {
-      return { description, actions: items };
-    }
-  }
-
-  throw new Error('Invalid AI JSON output');
-};
-
-const normalizeWorldBible = (wb) => {
-  const src = (wb && typeof wb === 'object') ? wb : {};
-  const cleanList = (arr) => (Array.isArray(arr) ? arr : [])
-    .map((e) => ({
-      name: typeof e?.name === 'string' ? e.name.trim() : '',
-      description: typeof e?.description === 'string' ? e.description.trim() : '',
-    }))
-    .filter((e) => e.name || e.description)
-    .slice(0, 100);
-
-  return {
-    premise: typeof src.premise === 'string' ? src.premise.trim() : '',
-    tone: typeof src.tone === 'string' ? src.tone.trim() : '',
-    rules: typeof src.rules === 'string' ? src.rules.trim() : '',
-    styleGuide: typeof src.styleGuide === 'string' ? src.styleGuide.trim() : '',
-    characters: cleanList(src.characters),
-    locations: cleanList(src.locations),
-  };
-};
-
-const buildWorldBibleSnippet = (wb, queryText, selectedLocationName) => {
-  const q = (queryText ?? '').toString().toLowerCase();
-  const data = normalizeWorldBible(wb);
-  const selected = (selectedLocationName ?? '').toString().trim();
-  const selectedLower = selected.toLowerCase();
-  const selectedLocation = selectedLower
-    ? data.locations.find((l) => (l?.name ?? '').toString().toLowerCase() === selectedLower)
-    : null;
-
-  const scoreEntry = (e) => {
-    const name = (e?.name ?? '').toString().toLowerCase();
-    if (!name) return 0;
-    if (q.includes(name)) return 10;
-    const parts = name.split(/[^a-z0-9]+/).filter((p) => p.length >= 3);
-    let score = 0;
-    for (const p of parts) {
-      if (q.includes(p)) score += 1;
-    }
-    return score;
-  };
-
-  const top = (arr, limit) => arr
-    .map((e) => ({ e, s: scoreEntry(e) }))
-    .filter((x) => x.s > 0)
-    .sort((a, b) => b.s - a.s)
-    .slice(0, limit)
-    .map((x) => x.e);
-
-  const topLocations = top(data.locations, 5);
-  const topCharacters = top(data.characters, 5);
-
-  const lines = [];
-  if (data.premise) lines.push(`Premise: ${data.premise}`);
-  if (data.tone) lines.push(`Tone: ${data.tone}`);
-  if (data.rules) lines.push(`World Rules: ${data.rules}`);
-  if (data.styleGuide) lines.push(`Style Guide: ${data.styleGuide}`);
-  if (selected) lines.push(`Selected Location: ${selected}`);
-
-  if (topLocations.length) {
-    lines.push('Relevant Locations:');
-    const ordered = selectedLocation
-      ? [selectedLocation, ...topLocations.filter((l) => l?.name !== selectedLocation?.name)]
-      : topLocations;
-    for (const l of ordered) {
-      lines.push(`- ${l.name}${l.description ? `: ${l.description}` : ''}`);
-    }
-  }
-
-  if (topCharacters.length) {
-    lines.push('Relevant Characters:');
-    for (const c of topCharacters) {
-      lines.push(`- ${c.name}${c.description ? `: ${c.description}` : ''}`);
-    }
-  }
-
-  return lines.join('\n');
-};
+const genAI = createGeminiClient(apiKey);
 
 // 1. 文本生成 API
 app.post('/api/generate', async (req, res) => {
-  const { title, storyContext, userPrompt, worldBible, location } = req.body;
-  console.log(`[Text Gen] Request for: ${title}`);
-
-  if (!genAI) {
-    return res.status(500).json({
-      error: 'AI is not configured',
-      details: 'Missing GEMINI_API_KEY on the backend'
+  try {
+    const { title, storyContext, userPrompt, worldBible, location, memory } = validateGenerateRequest(req.body);
+    console.log(`[Text Gen] Request for: ${title}`);
+    const modelsToTry = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-flash"];
+    const out = await generateSceneText({
+      genAI,
+      modelsToTry,
+      title,
+      storyContext,
+      userPrompt,
+      worldBible,
+      location,
+      memory,
+    });
+    return res.json(out);
+  } catch (error) {
+    const status = Number.isFinite(error?.statusCode) ? error.statusCode : 500;
+    return res.status(status).json({
+      error: status === 400 ? 'Bad request' : 'Failed to generate text',
+      details: error?.details || error?.message || 'Unknown error',
     });
   }
+});
 
-  // Model fallback list: prioritize 2.0-flash, then 2.0-flash-lite (lighter), then 2.5-flash (if available)
-  const modelsToTry = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-flash"];
-  let lastError = null;
-
-  for (const modelName of modelsToTry) {
-    try {
-      console.log(`[Text Gen] Attempting with model: ${modelName}`);
-      const model = genAI.getGenerativeModel({ model: modelName });
-
-      const wbSnippet = buildWorldBibleSnippet(worldBible, `${title || ''}\n${storyContext || ''}\n${userPrompt || ''}`, location);
-
-      const prompt = `
-      Global Story Context: ${storyContext}
-      ${wbSnippet ? `World Bible:\n${wbSnippet}` : `World Bible: None`}
-      Current Scene Title: ${title}
-      User Notes/Draft: ${userPrompt || "None"}
-      
-      Task: 
-      1. Write a atmospheric description for this scene (max 100 words).
-      2. Suggest 3 short actions the player can take next.
-      
-      IMPORTANT INSTRUCTION:
-      - If "User Notes/Draft" is provided, prioritize it over the "Global Story Context". 
-      - For example, if the Context says "scary" but User Notes say "peaceful", make it peaceful.
-      - The "Global Story Context" is background information, but the "Current Scene Title" and "User Notes" define the specific reality of THIS scene.
-      
-      Output strictly valid JSON format like this, without markdown code blocks:
-      {
-        "description": "...",
-        "actions": ["action1", "action2", "action3"]
-      }
-      `;
-
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      let text = response.text();
-      
-      // 清理可能存在的 Markdown 代码块标记
-      text = text.replace(/```json/g, '').replace(/```/g, '').trim();
-
-      const content = parseModelJson(text);
-      return res.json({ ...content, meta: { model: modelName } });
-
-    } catch (error) {
-      console.error(`[Text Gen] Error with ${modelName}:`, error.message);
-      lastError = error;
-      
-      // If error is 429 (Quota) or 503 (Service Unavailable), we continue to next model
-      if (error.message.includes('429') || error.message.includes('503') || error.message.includes('Invalid AI JSON output')) {
-        console.log(`[Text Gen] Switching to next model...`);
-        continue;
-      } else {
-        // If it's a different error (e.g., bad request), stop trying
-        break;
-      }
-    }
+app.post('/api/generate-player', async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const { title, storyContext, userPrompt, worldBible, location, memory } = validateGenerateRequest(body);
+    const attributes = body?.attributes && typeof body.attributes === 'object' ? body.attributes : {};
+    const playerState = `Attributes: ${JSON.stringify(attributes).slice(0, 2500)}`;
+    const modelsToTry = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-flash"];
+    const out = await generateSceneText({
+      genAI,
+      modelsToTry,
+      title,
+      storyContext,
+      userPrompt,
+      worldBible,
+      location,
+      memory,
+      playerState,
+    });
+    return res.json(out);
+  } catch (error) {
+    const status = Number.isFinite(error?.statusCode) ? error.statusCode : 500;
+    return res.status(status).json({
+      error: status === 400 ? 'Bad request' : 'Failed to generate player text',
+      details: error?.details || error?.message || 'Unknown error',
+    });
   }
+});
 
-  // If we get here, all models failed
-  console.error('All Gemini models failed.');
-  res.status(500).json({ 
-    error: 'Failed to generate text', 
-    details: lastError ? lastError.message : 'Unknown error'
-  });
+app.post('/api/update-memory', async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const memory = body?.memory && typeof body.memory === 'object' ? body.memory : {};
+    const events = Array.isArray(body?.events) ? body.events : [];
+    if (!events.length) {
+      return res.status(400).json({ error: 'Bad request', details: 'events is required' });
+    }
+    const modelsToTry = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-flash"];
+    const out = await updateLongTermMemory({ genAI, modelsToTry, memory, events });
+    return res.json(out);
+  } catch (error) {
+    const status = Number.isFinite(error?.statusCode) ? error.statusCode : 500;
+    return res.status(status).json({
+      error: status === 400 ? 'Bad request' : 'Failed to update memory',
+      details: error?.details || error?.message || 'Unknown error',
+    });
+  }
 });
 
 // 2. 图片生成 API
 app.post('/api/generate-image', async (req, res) => {
   const { description } = req.body;
-  console.log(`[Image Gen] Request received for: ${description.substring(0, 30)}...`);
+  console.log(`[Image Gen] Request received for: ${String(description ?? '').slice(0, 30)}...`);
 
   try {
     const raw = (description ?? '').toString();
@@ -420,17 +291,14 @@ app.get('/api/proxy-image', async (req, res) => {
   if (!url) return res.status(400).send('Missing url parameter');
 
   try {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`);
-
-    const buffer = await response.arrayBuffer();
-    const bufferData = Buffer.from(buffer);
-
-    res.setHeader('Content-Type', response.headers.get('content-type') || 'image/jpeg');
-    res.send(bufferData);
+    const { buffer, contentType } = await fetchProxiedImage(String(url));
+    res.setHeader('Content-Type', contentType || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(buffer);
   } catch (error) {
-    console.error('Proxy Error:', error.message);
-    res.status(500).send('Failed to proxy image');
+    const status = Number.isFinite(error?.statusCode) ? error.statusCode : 500;
+    console.error('Proxy Error:', error?.message || error);
+    res.status(status).send(status === 403 ? 'Blocked url' : 'Failed to proxy image');
   }
 });
 

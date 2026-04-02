@@ -3,23 +3,45 @@ import React, { useState, useEffect, useRef } from 'react';
 import './PlayerView.css'; 
 import { getDisplayImageUrl } from './imageUtils.js';
 import { applyEffects, evaluateConditions } from './attributeEngine.js';
+import { appendEvaluationLog, getEvaluationLogs } from './evaluationLog.js';
+import { getStoryMemory, pickMemoryUpdateLogs, resetStoryMemory, selectFactsForScene, setStoryMemory } from './storyMemory.js';
 
-export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }) {
+export default function PlayerView({ nodes, edges, storyContext, worldBible, onExit, initialNodeId = '1' }) {
   const [currentNodeId, setCurrentNodeId] = useState(initialNodeId);
   const [history, setHistory] = useState([]);
   const [usedChoiceIds, setUsedChoiceIds] = useState(() => new Set());
   const [attributes, setAttributes] = useState({});
+  const attributesRef = useRef({});
   const [appliedNodeEffectIds, setAppliedNodeEffectIds] = useState(() => new Set());
   const [choiceFeedback, setChoiceFeedback] = useState(null);
   const choiceFeedbackTimeoutRef = useRef(null);
+  const memoryUpdateTimeoutRef = useRef(null);
+  const memoryUpdateInFlightRef = useRef(false);
+  const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+  const playerGenAbortRef = useRef(null);
+  const playerGenCacheRef = useRef(new Map());
 
   const [currentNode, setCurrentNode] = useState(null);
   const [currentChoices, setCurrentChoices] = useState([]);
+  const [runtimeDescription, setRuntimeDescription] = useState('');
+  const [isRuntimeGenerating, setIsRuntimeGenerating] = useState(false);
+
+  useEffect(() => {
+    attributesRef.current = attributes;
+  }, [attributes]);
 
   useEffect(() => () => {
     if (choiceFeedbackTimeoutRef.current) {
       window.clearTimeout(choiceFeedbackTimeoutRef.current);
       choiceFeedbackTimeoutRef.current = null;
+    }
+    if (memoryUpdateTimeoutRef.current) {
+      window.clearTimeout(memoryUpdateTimeoutRef.current);
+      memoryUpdateTimeoutRef.current = null;
+    }
+    if (playerGenAbortRef.current) {
+      playerGenAbortRef.current.abort();
+      playerGenAbortRef.current = null;
     }
   }, []);
 
@@ -32,9 +54,21 @@ export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }
     setAttributes({});
     setAppliedNodeEffectIds(new Set());
     setChoiceFeedback(null);
+    setRuntimeDescription('');
+    setIsRuntimeGenerating(false);
+    playerGenCacheRef.current = new Map();
+    resetStoryMemory();
     if (choiceFeedbackTimeoutRef.current) {
       window.clearTimeout(choiceFeedbackTimeoutRef.current);
       choiceFeedbackTimeoutRef.current = null;
+    }
+    if (memoryUpdateTimeoutRef.current) {
+      window.clearTimeout(memoryUpdateTimeoutRef.current);
+      memoryUpdateTimeoutRef.current = null;
+    }
+    if (playerGenAbortRef.current) {
+      playerGenAbortRef.current.abort();
+      playerGenAbortRef.current = null;
     }
   }, [initialNodeId, nodes]);
 
@@ -72,6 +106,161 @@ export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }
     });
   }, [currentNodeId, nodes]);
 
+  const scheduleMemoryUpdate = () => {
+    if (memoryUpdateTimeoutRef.current) window.clearTimeout(memoryUpdateTimeoutRef.current);
+    memoryUpdateTimeoutRef.current = window.setTimeout(async () => {
+      if (memoryUpdateInFlightRef.current) return;
+      const memory = getStoryMemory();
+      const logs = getEvaluationLogs();
+      const delta = pickMemoryUpdateLogs(logs, memory.lastProcessedLogTs, 20);
+      if (!delta.length) return;
+      memoryUpdateInFlightRef.current = true;
+      const startedAt = performance.now();
+      appendEvaluationLog({
+        type: 'ai_memory_update_start',
+        events: delta.length,
+        lastProcessedLogTs: memory.lastProcessedLogTs || '',
+      });
+      try {
+        const response = await fetch(`${apiBaseUrl}/api/update-memory`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ memory, events: delta }),
+        });
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          appendEvaluationLog({
+            type: 'ai_memory_update_error',
+            status: response.status,
+            durationMs: Math.round(performance.now() - startedAt),
+            error: errorData.details || errorData.error || 'Network response was not ok',
+          });
+          return;
+        }
+        const data = await response.json();
+        const lastLogTs = typeof delta[delta.length - 1]?.ts === 'string' ? delta[delta.length - 1].ts : memory.lastProcessedLogTs;
+        setStoryMemory({
+          summary: data?.summary || '',
+          facts: Array.isArray(data?.facts) ? data.facts : [],
+          lastProcessedLogTs: lastLogTs || '',
+          runId: memory.runId,
+        });
+        appendEvaluationLog({
+          type: 'ai_memory_update_success',
+          durationMs: Math.round(performance.now() - startedAt),
+          model: data?.meta?.model || '',
+          factsCount: Array.isArray(data?.facts) ? data.facts.length : 0,
+        });
+      } catch (e) {
+        appendEvaluationLog({
+          type: 'ai_memory_update_error',
+          durationMs: Math.round(performance.now() - startedAt),
+          error: e?.message || 'Unknown error',
+        });
+      } finally {
+        memoryUpdateInFlightRef.current = false;
+      }
+    }, 900);
+  };
+
+  useEffect(() => {
+    const node = nodes?.find((n) => n.id === currentNodeId);
+    if (!node) return;
+    const dynamicDescriptionEnabled = node?.data?.dynamicDescriptionEnabled !== false;
+    if (!dynamicDescriptionEnabled) {
+      if (playerGenAbortRef.current) {
+        playerGenAbortRef.current.abort();
+        playerGenAbortRef.current = null;
+      }
+      setRuntimeDescription('');
+      setIsRuntimeGenerating(false);
+    } else {
+    const memory = getStoryMemory();
+    const selectedFacts = selectFactsForScene(memory, { title: node?.data?.label || '', location: node?.data?.location || '', limit: 8 });
+    const cacheKey = `${node.id}|${JSON.stringify(attributesRef.current)}|${JSON.stringify(selectedFacts)}`;
+    const cached = playerGenCacheRef.current.get(cacheKey);
+    if (cached && typeof cached === 'string') {
+      setRuntimeDescription(cached);
+      setIsRuntimeGenerating(false);
+    } else {
+      const controller = new AbortController();
+      if (playerGenAbortRef.current) playerGenAbortRef.current.abort();
+      playerGenAbortRef.current = controller;
+      setIsRuntimeGenerating(true);
+      const startedAt = performance.now();
+      appendEvaluationLog({
+        type: 'ai_generate_player_text_start',
+        nodeId: node.id,
+        title: node?.data?.label || '',
+        location: node?.data?.location || '',
+        memorySummaryLength: (memory.summary || '').length,
+        memoryFactsCount: Array.isArray(selectedFacts) ? selectedFacts.length : 0,
+      });
+      fetch(`${apiBaseUrl}/api/generate-player`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: node?.data?.label || '',
+          storyContext: storyContext || '',
+          userPrompt: node?.data?.setting || '',
+          worldBible: worldBible || null,
+          location: node?.data?.location || '',
+          memory: { summary: memory.summary, facts: selectedFacts },
+          attributes: attributesRef.current,
+        }),
+        signal: controller.signal,
+      })
+        .then(async (r) => {
+          if (!r.ok) {
+            const errorData = await r.json().catch(() => ({}));
+            throw new Error(errorData.details || errorData.error || 'Network response was not ok');
+          }
+          return r.json();
+        })
+        .then((data) => {
+          const desc = typeof data?.description === 'string' ? data.description : '';
+          if (desc) {
+            playerGenCacheRef.current.set(cacheKey, desc);
+            setRuntimeDescription(desc);
+          } else {
+            setRuntimeDescription('');
+          }
+          appendEvaluationLog({
+            type: 'ai_generate_player_text_success',
+            nodeId: node.id,
+            title: node?.data?.label || '',
+            durationMs: Math.round(performance.now() - startedAt),
+            model: data?.meta?.model || '',
+          });
+        })
+        .catch((e) => {
+          if (e?.name === 'AbortError') return;
+          appendEvaluationLog({
+            type: 'ai_generate_player_text_error',
+            nodeId: node.id,
+            title: node?.data?.label || '',
+            durationMs: Math.round(performance.now() - startedAt),
+            error: e?.message || 'Unknown error',
+          });
+          setRuntimeDescription('');
+        })
+        .finally(() => {
+          if (playerGenAbortRef.current === controller) playerGenAbortRef.current = null;
+          setIsRuntimeGenerating(false);
+        });
+    }
+    }
+    appendEvaluationLog({
+      type: 'play_enter',
+      nodeId: node.id,
+      title: node?.data?.label || '',
+      location: node?.data?.location || '',
+      descriptionSnippet: String(node?.data?.description || '').slice(0, 220),
+      attributesSnapshot: attributesRef.current,
+    });
+    scheduleMemoryUpdate();
+  }, [currentNodeId]);
+
   const getChoiceDisabledReason = (edge) => {
     if (!edge) return null;
     const locked = !evaluateConditions(attributes, edge?.data?.requirements);
@@ -101,6 +290,9 @@ export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }
       showChoiceFeedback(reason);
       return;
     }
+    const fromNode = nodes.find((n) => n.id === currentNodeId);
+    const toNode = nodes.find((n) => n.id === edge.target);
+    const nextAttributes = edge?.data?.effects ? applyEffects(attributes, edge.data.effects) : attributes;
     const isSingleUse = Boolean(edge?.data?.singleUse);
     if (isSingleUse) {
       setUsedChoiceIds((prev) => {
@@ -109,11 +301,20 @@ export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }
         return next;
       });
     }
-    if (edge?.data?.effects) {
-      setAttributes((a) => applyEffects(a, edge.data.effects));
-    }
+    if (edge?.data?.effects) setAttributes(nextAttributes);
+    appendEvaluationLog({
+      type: 'play_choice',
+      fromNodeId: currentNodeId,
+      fromTitle: fromNode?.data?.label || '',
+      choiceId: edge.id,
+      choiceText: edge.label || '',
+      toNodeId: edge.target,
+      toTitle: toNode?.data?.label || '',
+      attributesAfter: nextAttributes,
+    });
     setHistory((h) => [...h, currentNodeId]);
     setCurrentNodeId(edge.target);
+    scheduleMemoryUpdate();
   };
 
   const handleBack = () => {
@@ -137,6 +338,8 @@ export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }
       window.clearTimeout(choiceFeedbackTimeoutRef.current);
       choiceFeedbackTimeoutRef.current = null;
     }
+    appendEvaluationLog({ type: 'play_restart' });
+    resetStoryMemory();
     setCurrentNodeId(exists ? initialNodeId : nodes[0].id);
   };
 
@@ -181,7 +384,7 @@ export default function PlayerView({ nodes, edges, onExit, initialNodeId = '1' }
           <img src={getDisplayImageUrl(currentNode.data.imageUrl)} alt={currentNode.data.label} className="player-image" />
         )}
         <h2 className="player-title">{currentNode.data.label}</h2>
-        <p className="player-description">{currentNode.data.description}</p>
+        <p className="player-description">{runtimeDescription || currentNode.data.description}</p>
 
         <div className="player-choices">
           {currentChoices.length > 0 ? (
