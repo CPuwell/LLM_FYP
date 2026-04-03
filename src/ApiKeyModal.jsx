@@ -34,13 +34,13 @@ export default function ApiKeyModal({ isOpen, onClose }) {
     try {
       const k = value.trim();
       const headers = k ? { 'X-Gemini-Api-Key': k } : buildGeminiKeyHeader();
-      const r = await fetch(`${apiBaseUrl}/api/debug-generate?model=gemini-2.5-flash`, { headers });
+      const r = await fetch(`${apiBaseUrl}/api/debug-gemini`, { headers });
       const data = await r.json().catch(() => ({}));
       if (!data?.ok) {
         setTestResult(data?.error?.message || data?.error || data?.details || 'Test failed.');
         return;
       }
-      setTestResult(`OK (model=${data?.model || 'unknown'}, ms=${data?.ms || ''})`);
+      setTestResult(`OK (models=${data?.modelsCount || 0}, status=${data?.status || ''})`);
     } catch (e) {
       setTestResult(e?.message || 'Test failed.');
     } finally {
