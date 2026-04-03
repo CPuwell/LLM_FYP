@@ -19,6 +19,7 @@ import GuideModal from './GuideModal.jsx';
 import './GuideModal.css';
 import EvaluationLogsModal from './EvaluationLogsModal.jsx';
 import './EvaluationLogsModal.css';
+import ApiKeyModal from './ApiKeyModal.jsx';
 import ChoiceEdge from './ChoiceEdge.jsx';
 import SmoothStepEdge from './SmoothStepEdge.jsx';
 import BezierEdge from './BezierEdge.jsx';
@@ -331,6 +332,7 @@ function App() {
   const [isAnalysisOpen, setIsAnalysisOpen] = useState(false);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
+  const [isApiKeyOpen, setIsApiKeyOpen] = useState(false);
   const [edgeStyleMode, setEdgeStyleMode] = useState('defaultPlus');
   const autosaveTimeoutRef = useRef(null);
   const reactFlowInstanceRef = useRef(null);
@@ -768,6 +770,7 @@ function App() {
             <button onClick={() => setIsAnalysisOpen(true)} title="Analyze story graph">🔎 Analyze</button>
             <button onClick={() => setIsGuideOpen(true)} title="Quick guide">❓ Guide</button>
             <button onClick={() => setIsLogsOpen(true)} title="View evaluation logs">🧾 Logs</button>
+            <button onClick={() => setIsApiKeyOpen(true)} title="Set per-user Gemini API key">🔑 API Key</button>
             <select value={edgeStyleMode} onChange={(e) => setEdgeStyleMode(e.target.value)} title="Edge routing style">
               <option value="custom">Edges: Custom</option>
               <option value="default">Edges: Default</option>
@@ -862,6 +865,11 @@ function App() {
       <EvaluationLogsModal
         isOpen={isLogsOpen}
         onClose={() => setIsLogsOpen(false)}
+      />
+
+      <ApiKeyModal
+        isOpen={isApiKeyOpen}
+        onClose={() => setIsApiKeyOpen(false)}
       />
     </div>
   );

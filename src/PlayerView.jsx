@@ -5,6 +5,7 @@ import { getDisplayImageUrl } from './imageUtils.js';
 import { applyEffects, evaluateConditions } from './attributeEngine.js';
 import { appendEvaluationLog, getEvaluationLogs } from './evaluationLog.js';
 import { getStoryMemory, pickMemoryUpdateLogs, resetStoryMemory, selectFactsForScene, setStoryMemory } from './storyMemory.js';
+import { buildGeminiKeyHeader } from './userApiKey.js';
 
 export default function PlayerView({ nodes, edges, storyContext, worldBible, onExit, initialNodeId = '1' }) {
   const [currentNodeId, setCurrentNodeId] = useState(initialNodeId);
@@ -124,7 +125,7 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
       try {
         const response = await fetch(`${apiBaseUrl}/api/update-memory`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...buildGeminiKeyHeader() },
           body: JSON.stringify({ memory, events: delta }),
         });
         if (!response.ok) {
@@ -198,7 +199,7 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
       });
       fetch(`${apiBaseUrl}/api/generate-player`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...buildGeminiKeyHeader() },
         body: JSON.stringify({
           title: node?.data?.label || '',
           storyContext: storyContext || '',
@@ -384,6 +385,12 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
           <img src={getDisplayImageUrl(currentNode.data.imageUrl)} alt={currentNode.data.label} className="player-image" />
         )}
         <h2 className="player-title">{currentNode.data.label}</h2>
+        {isRuntimeGenerating ? (
+          <div className="player-runtime-loading" role="status" aria-live="polite">
+            <div className="player-progress" />
+            <div className="player-runtime-loading-text">Generating scene...</div>
+          </div>
+        ) : null}
         <p className="player-description">{runtimeDescription || currentNode.data.description}</p>
 
         <div className="player-choices">

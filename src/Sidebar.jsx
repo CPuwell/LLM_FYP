@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { getDisplayImageUrl } from './imageUtils.js';
 import { appendEvaluationLog } from './evaluationLog.js';
 import { getStoryMemory, selectFactsForScene } from './storyMemory.js';
+import { buildGeminiKeyHeader } from './userApiKey.js';
 
 // accept new prop: onDeleteElement
 export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEdgeLabelChange, onEdgeDataChange, storyContext, worldBible, attributeKeyOptions, sidebarWidth, onSidebarWidthChange, addNodeFromSuggestion, onDeleteElement }) {
@@ -169,7 +170,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
     try {
       const response = await fetch(`${apiBaseUrl}/api/generate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...buildGeminiKeyHeader() },
         // Send the current description as context
         body: JSON.stringify(requestBody),
       });
@@ -241,7 +242,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
     try {
       const response = await fetch(`${apiBaseUrl}/api/generate-player`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...buildGeminiKeyHeader() },
         body: JSON.stringify({
           title: selectedNode.data.label,
           storyContext,

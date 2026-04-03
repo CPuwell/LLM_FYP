@@ -157,7 +157,7 @@ export const updateLongTermMemory = async ({ genAI, modelsToTry, memory, events 
 
   const modelList = Array.isArray(modelsToTry) && modelsToTry.length
     ? modelsToTry
-    : ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-2.5-flash'];
+    : ['gemini-2.5-flash', 'gemini-2.0-flash-001', 'gemini-2.0-flash-lite-001'];
 
   const prompt = buildMemoryPrompt({ memory, events });
 

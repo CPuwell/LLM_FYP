@@ -10,7 +10,12 @@ import { validateGenerateRequest } from './server/validate.js';
 import { updateLongTermMemory } from './server/memory.js';
 import { fetchProxiedImage } from './server/proxyImage.js';
 
-dotenv.config();
+const preDotenvKey = process.env.GEMINI_API_KEY;
+dotenv.config({ override: true });
+const postDotenvKey = process.env.GEMINI_API_KEY;
+if (preDotenvKey && postDotenvKey && preDotenvKey !== postDotenvKey) {
+  console.log('[dotenv] GEMINI_API_KEY overridden from .env');
+}
 
 const app = express();
 const port = 3001;
@@ -52,18 +57,167 @@ const saveBufferToGenerated = (buffer, contentType) => {
 const apiKey = process.env.GEMINI_API_KEY;
 if (!apiKey) {
   console.error("❌ Error: GEMINI_API_KEY is missing in .env file");
+} else {
+  const fingerprint = crypto.createHash('sha256').update(apiKey).digest('hex').slice(0, 10);
+  const suffix = apiKey.slice(-6);
+  console.log(`[Gemini] GEMINI_API_KEY loaded (sha256[0..10]=${fingerprint}, suffix=...${suffix})`);
 }
 
 const genAI = createGeminiClient(apiKey);
 
+const getGeminiKeyFromRequest = (req) => {
+  const direct = (req.get('x-gemini-api-key') || '').trim();
+  if (direct) return { key: direct, source: 'x-gemini-api-key' };
+
+  const auth = (req.get('authorization') || '').trim();
+  const m = auth.match(/^Bearer\s+(.+)$/i);
+  if (m && m[1] && m[1].trim()) return { key: m[1].trim(), source: 'authorization' };
+
+  const envKey = (process.env.GEMINI_API_KEY || '').trim();
+  if (envKey) return { key: envKey, source: 'env' };
+
+  return { key: '', source: 'none' };
+};
+
+const getGenAIForRequest = (req) => {
+  const { key, source } = getGeminiKeyFromRequest(req);
+  if (!key) return { genAI: null, keySource: source };
+  if (source === 'env') return { genAI, keySource: source };
+  return { genAI: createGeminiClient(key), keySource: source };
+};
+
+app.get('/api/debug-gemini', async (req, res) => {
+  const { key, source } = getGeminiKeyFromRequest(req);
+  const fingerprint = key ? crypto.createHash('sha256').update(key).digest('hex').slice(0, 10) : '';
+  const suffix = key && source === 'env' ? key.slice(-6) : '';
+  const envOverrode = Boolean(preDotenvKey && postDotenvKey && preDotenvKey !== postDotenvKey);
+
+  if (!key) {
+    return res.status(500).json({
+      ok: false,
+      error: 'Missing GEMINI_API_KEY',
+      keyFingerprint: '',
+      keySuffix: '',
+      keySource: source,
+      envOverrode,
+    });
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 6000);
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`;
+    const r = await fetch(url, { signal: controller.signal });
+    const text = await r.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { raw: text.slice(0, 800) };
+    }
+
+    const models = Array.isArray(data?.models)
+      ? data.models.map((m) => (typeof m?.name === 'string' ? m.name : '')).filter(Boolean).slice(0, 50)
+      : [];
+
+    return res.status(200).json({
+      ok: r.ok,
+      status: r.status,
+      keyFingerprint: fingerprint,
+      keySuffix: suffix ? `...${suffix}` : '',
+      keySource: source,
+      envOverrode,
+      modelsCount: models.length,
+      models,
+      error: data?.error ? { code: data.error.code, status: data.error.status, message: data.error.message } : null,
+    });
+  } catch (e) {
+    const isAbort = e?.name === 'AbortError';
+    return res.status(200).json({
+      ok: false,
+      status: isAbort ? 504 : 500,
+      keyFingerprint: fingerprint,
+      keySuffix: suffix ? `...${suffix}` : '',
+      keySource: source,
+      envOverrode,
+      modelsCount: 0,
+      models: [],
+      error: { message: isAbort ? 'Timeout calling models list' : (e?.message || 'Unknown error') },
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+});
+
+app.get('/api/debug-generate', async (req, res) => {
+  const { key, source } = getGeminiKeyFromRequest(req);
+  const { genAI: reqGenAI } = getGenAIForRequest(req);
+  const fingerprint = key ? crypto.createHash('sha256').update(key).digest('hex').slice(0, 10) : '';
+  const envOverrode = Boolean(preDotenvKey && postDotenvKey && preDotenvKey !== postDotenvKey);
+  const modelName = typeof req.query.model === 'string' && req.query.model.trim() ? req.query.model.trim() : 'gemini-2.5-flash';
+
+  if (!reqGenAI || !key) {
+    return res.status(500).json({
+      ok: false,
+      status: 500,
+      model: modelName,
+      keyFingerprint: fingerprint,
+      keySource: source,
+      envOverrode,
+      error: 'Missing GEMINI_API_KEY',
+    });
+  }
+
+  const startedAt = Date.now();
+  try {
+    const model = reqGenAI.getGenerativeModel({
+      model: modelName,
+      generationConfig: {
+        responseMimeType: 'application/json',
+        temperature: 0,
+      },
+    });
+    const result = await model.generateContent('Return only JSON: {"ok":true}');
+    const response = await result.response;
+    const text = response.text();
+    return res.status(200).json({
+      ok: true,
+      status: 200,
+      model: modelName,
+      keyFingerprint: fingerprint,
+      keySource: source,
+      envOverrode,
+      ms: Date.now() - startedAt,
+      sample: text.slice(0, 300),
+    });
+  } catch (e) {
+    return res.status(200).json({
+      ok: false,
+      status: 200,
+      model: modelName,
+      keyFingerprint: fingerprint,
+      keySource: source,
+      envOverrode,
+      ms: Date.now() - startedAt,
+      error: e?.message || 'Unknown error',
+    });
+  }
+});
+
 // 1. 文本生成 API
 app.post('/api/generate', async (req, res) => {
   try {
+    const { genAI: reqGenAI } = getGenAIForRequest(req);
+    if (!reqGenAI) {
+      const err = new Error('Missing GEMINI_API_KEY');
+      err.statusCode = 500;
+      throw err;
+    }
     const { title, storyContext, userPrompt, worldBible, location, memory } = validateGenerateRequest(req.body);
     console.log(`[Text Gen] Request for: ${title}`);
-    const modelsToTry = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-flash"];
+    const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash-001", "gemini-2.0-flash-lite-001"];
     const out = await generateSceneText({
-      genAI,
+      genAI: reqGenAI,
       modelsToTry,
       title,
       storyContext,
@@ -84,13 +238,19 @@ app.post('/api/generate', async (req, res) => {
 
 app.post('/api/generate-player', async (req, res) => {
   try {
+    const { genAI: reqGenAI } = getGenAIForRequest(req);
+    if (!reqGenAI) {
+      const err = new Error('Missing GEMINI_API_KEY');
+      err.statusCode = 500;
+      throw err;
+    }
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const { title, storyContext, userPrompt, worldBible, location, memory } = validateGenerateRequest(body);
     const attributes = body?.attributes && typeof body.attributes === 'object' ? body.attributes : {};
     const playerState = `Attributes: ${JSON.stringify(attributes).slice(0, 2500)}`;
-    const modelsToTry = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-flash"];
+    const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash-001", "gemini-2.0-flash-lite-001"];
     const out = await generateSceneText({
-      genAI,
+      genAI: reqGenAI,
       modelsToTry,
       title,
       storyContext,
@@ -112,14 +272,20 @@ app.post('/api/generate-player', async (req, res) => {
 
 app.post('/api/update-memory', async (req, res) => {
   try {
+    const { genAI: reqGenAI } = getGenAIForRequest(req);
+    if (!reqGenAI) {
+      const err = new Error('Missing GEMINI_API_KEY');
+      err.statusCode = 500;
+      throw err;
+    }
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const memory = body?.memory && typeof body.memory === 'object' ? body.memory : {};
     const events = Array.isArray(body?.events) ? body.events : [];
     if (!events.length) {
       return res.status(400).json({ error: 'Bad request', details: 'events is required' });
     }
-    const modelsToTry = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-flash"];
-    const out = await updateLongTermMemory({ genAI, modelsToTry, memory, events });
+    const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash-001", "gemini-2.0-flash-lite-001"];
+    const out = await updateLongTermMemory({ genAI: reqGenAI, modelsToTry, memory, events });
     return res.json(out);
   } catch (error) {
     const status = Number.isFinite(error?.statusCode) ? error.statusCode : 500;
