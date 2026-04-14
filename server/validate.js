@@ -30,7 +30,12 @@ export const validateGenerateRequest = (body) => {
 
   const errors = [];
   if (!asString(title).trim()) errors.push('title is required');
-  if (!asString(storyContext).trim()) errors.push('storyContext is required');
+  const hasAnyContext = Boolean(
+    asString(storyContext).trim() ||
+    asString(userPrompt).trim() ||
+    worldBible,
+  );
+  if (!hasAnyContext) errors.push('storyContext or userPrompt or worldBible is required');
 
   if (errors.length) {
     const err = new Error(errors.join('; '));

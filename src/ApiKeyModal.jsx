@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import './ApiKeyModal.css';
+import { getApiBaseUrl } from './apiBaseUrl.js';
 import { buildGeminiKeyHeader, clearUserGeminiApiKey, getUserGeminiApiKey, setUserGeminiApiKey } from './userApiKey.js';
 
 export default function ApiKeyModal({ isOpen, onClose }) {
@@ -7,7 +8,7 @@ export default function ApiKeyModal({ isOpen, onClose }) {
   const [show, setShow] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState('');
-  const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+  const apiBaseUrl = getApiBaseUrl();
 
   useEffect(() => {
     if (!isOpen) return;

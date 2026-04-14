@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { asString } from './strings.js';
+import { asString, trimTo } from './strings.js';
 import { buildWorldBibleSnippet } from './worldBible.js';
 import { buildScenePrompt, PROMPT_VERSION } from './prompt.js';
 
@@ -17,6 +17,46 @@ const normalizeModelJson = (obj) => {
   if (!description) throw new Error('Missing description');
   if (actions.length !== 3) throw new Error('Missing actions');
   return { description, actions };
+};
+
+const escapeRawNewlinesInJsonStrings = (input) => {
+  const s = asString(input);
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < s.length; i += 1) {
+    const ch = s[i];
+    if (inString) {
+      if (escaped) {
+        out += ch;
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        out += ch;
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        out += ch;
+        inString = false;
+        continue;
+      }
+      if (ch === '\n') {
+        out += '\\n';
+        continue;
+      }
+      if (ch === '\r') {
+        continue;
+      }
+      out += ch;
+      continue;
+    }
+
+    out += ch;
+    if (ch === '"') inString = true;
+  }
+  return out;
 };
 
 export const parseModelJson = (rawText) => {
@@ -42,23 +82,29 @@ export const parseModelJson = (rawText) => {
     }
   };
 
-  const direct = tryJson(cleaned);
-  if (direct) return direct;
+  const candidates = [cleaned];
+  const escapedNewlines = escapeRawNewlinesInJsonStrings(cleaned);
+  if (escapedNewlines !== cleaned) candidates.push(escapedNewlines);
 
-  const first = cleaned.indexOf('{');
-  const last = cleaned.lastIndexOf('}');
-  if (first !== -1 && last !== -1 && last > first) {
-    const sliced = tryJson(cleaned.slice(first, last + 1));
-    if (sliced) return sliced;
+  for (const candidate of candidates) {
+    const direct = tryJson(candidate);
+    if (direct) return direct;
+
+    const first = candidate.indexOf('{');
+    const last = candidate.lastIndexOf('}');
+    if (first !== -1 && last !== -1 && last > first) {
+      const sliced = tryJson(candidate.slice(first, last + 1));
+      if (sliced) return sliced;
+    }
   }
 
   throw new Error(lastReason ? `Invalid AI JSON output: ${lastReason}` : 'Invalid AI JSON output');
 };
 
-const isRetryableGeminiError = (err) => {
-  const msg = asString(err?.message);
-  return msg.includes('429') || msg.includes('503') || msg.includes('Invalid AI JSON output');
-};
+  const isRetryableGeminiError = (err) => {
+    const msg = asString(err?.message);
+    return msg.includes('429') || msg.includes('503') || msg.includes('Invalid AI JSON output') || msg.includes('MAX_TOKENS');
+  };
 
 export const createGeminiClient = (apiKey) => {
   const key = asString(apiKey).trim();
@@ -90,7 +136,7 @@ export const generateSceneText = async ({
 
   const modelList = Array.isArray(modelsToTry) && modelsToTry.length
     ? modelsToTry
-    : ['gemini-2.5-flash', 'gemini-2.0-flash-001', 'gemini-2.0-flash-lite-001'];
+    : ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 
   const wbSnippet = buildWorldBibleSnippet(
     worldBible,
@@ -98,7 +144,7 @@ export const generateSceneText = async ({
     location,
   );
 
-  const prompt = buildScenePrompt({
+  const promptFull = buildScenePrompt({
     title,
     storyContext,
     userPrompt,
@@ -107,34 +153,156 @@ export const generateSceneText = async ({
     playerState,
   });
 
+  const wbSnippetCompact = buildWorldBibleSnippet(
+    worldBible,
+    `${title || ''}\n${trimTo(userPrompt, 1800)}`,
+    location,
+    { maxChars: 1600, locationLimit: 4, characterLimit: 4 },
+  );
+
+  const promptCompact = buildScenePrompt({
+    title: trimTo(title, 120),
+    storyContext: trimTo(storyContext, 6000),
+    userPrompt: trimTo(userPrompt, 3500),
+    worldBibleSnippet: wbSnippetCompact,
+    memory: memory ? {
+      summary: trimTo(memory.summary, 1000),
+      facts: Array.isArray(memory.facts) ? memory.facts.slice(0, 8) : [],
+    } : null,
+    playerState: trimTo(playerState, 1500),
+  });
+
+  const wbSnippetTiny = buildWorldBibleSnippet(
+    worldBible,
+    `${trimTo(title, 160) || ''}\n${trimTo(userPrompt, 1600)}`,
+    location,
+    { maxChars: 700, locationLimit: 2, characterLimit: 2 },
+  );
+
+  const promptTiny = buildScenePrompt({
+    title: trimTo(title, 120),
+    storyContext: trimTo(storyContext, 2000),
+    userPrompt: trimTo(userPrompt, 2200),
+    worldBibleSnippet: wbSnippetTiny,
+    memory: memory ? {
+      summary: trimTo(memory.summary, 500),
+      facts: Array.isArray(memory.facts) ? memory.facts.slice(0, 2) : [],
+    } : null,
+    playerState: trimTo(playerState, 900),
+  });
+
+  const buildJsonRepairPrompt = ({ schema, parseError, badOutput }) => [
+    'You are a JSON repair tool.',
+    'Return ONLY valid JSON. No markdown, no code fences, no extra keys.',
+    `Schema: ${schema}`,
+    `Parse error: ${trimTo(parseError, 500) || '(unknown)'}`,
+    'Fix the following output into valid JSON matching the schema.',
+    'Bad output:',
+    trimTo(badOutput, 8000),
+  ].join('\n');
+
+  const debug = process.env.AI_DEBUG === '1';
+  const variantStrategy = (process.env.AI_VARIANT_STRATEGY || '').toString().trim().toLowerCase();
+  const forcedVariant = (process.env.AI_PROMPT_VARIANT || '').toString().trim().toLowerCase();
+  const allVariants = variantStrategy === 'quality'
+    ? [
+      { name: 'full', prompt: promptFull },
+      { name: 'compact', prompt: promptCompact },
+      { name: 'tiny', prompt: promptTiny },
+    ]
+    : [
+      { name: 'tiny', prompt: promptTiny },
+      { name: 'compact', prompt: promptCompact },
+    ];
+  const variants = forcedVariant
+    ? allVariants.filter((v) => v.name === forcedVariant)
+    : allVariants;
+
   for (const modelName of modelList) {
-    try {
-      const model = genAI.getGenerativeModel({
-        model: modelName,
-        generationConfig: {
-          responseMimeType: 'application/json',
-        },
-      });
-
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
-      const content = parseModelJson(text);
-
-      return {
-        ...content,
-        meta: {
-          requestId,
+    for (const variant of variants) {
+      try {
+        const generationConfig = {
+          temperature: 0.5,
+          topP: 0.9,
+          maxOutputTokens: 2048,
+        };
+        const model = genAI.getGenerativeModel({
           model: modelName,
-          promptVersion: PROMPT_VERSION,
-          ms: Date.now() - startedAt,
-        },
-      };
-    } catch (error) {
-      lastError = error;
-      if (isRetryableGeminiError(error)) continue;
-      break;
+          generationConfig: {
+            ...generationConfig,
+          },
+        });
+
+        const result = await model.generateContent(variant.prompt);
+        const response = await result.response;
+        const text = response.text();
+
+        if (debug) {
+          console.log(`\n\n[DEBUG] === ${modelName} (${variant.name}) ===`);
+          console.log('[DEBUG] Finish Reason:', response.candidates?.[0]?.finishReason);
+          console.log('[DEBUG] Token Count (Prompt):', response.usageMetadata?.promptTokenCount);
+          console.log('[DEBUG] Token Count (Candidates):', response.usageMetadata?.candidatesTokenCount);
+          console.log('[DEBUG] Token Count (Total):', response.usageMetadata?.totalTokenCount);
+          console.log('[DEBUG] Max Output Tokens (Config):', generationConfig.maxOutputTokens);
+          console.log('[DEBUG] Text Output Length:', text.length);
+          console.log('[DEBUG] Output Snippet:\n', text.slice(-500));
+          console.log('=======================\n\n');
+        }
+
+        let content;
+        try {
+          content = parseModelJson(text);
+        } catch (e) {
+          const msg = asString(e?.message);
+          if (response.promptFeedback?.blockReason) {
+            throw new Error(`Invalid AI JSON output: ${response.promptFeedback.blockReason}`);
+          }
+          if (!msg.includes('Invalid AI JSON output')) throw e;
+          const repairModel = genAI.getGenerativeModel({
+            model: modelName,
+            generationConfig: {
+              temperature: 0.0,
+              topP: 0.1,
+              maxOutputTokens: 1024,
+            },
+          });
+          const finishReason = response.candidates?.[0]?.finishReason;
+          const repairPrompt = buildJsonRepairPrompt({
+            schema: '{"description":"...","actions":["...","...","..."]}',
+            parseError: finishReason ? `${msg} (finishReason=${finishReason})` : msg,
+            badOutput: text,
+          });
+          const repairResult = await repairModel.generateContent(repairPrompt);
+          const repairResponse = await repairResult.response;
+          const repairedText = repairResponse.text();
+          content = parseModelJson(repairedText);
+        }
+
+        return {
+          ...content,
+          meta: {
+            requestId,
+            model: modelName,
+            promptVersion: PROMPT_VERSION,
+            promptVariant: variant.name,
+            ms: Date.now() - startedAt,
+          },
+        };
+      } catch (error) {
+        lastError = error;
+        const msg = asString(error?.message).toUpperCase();
+        const isMaxTokens = msg.includes('MAX_TOKENS') || msg.includes('TOKEN_LIMIT') || msg.includes('CONTEXT') || msg.includes('CONTEXT_LENGTH');
+        if (isMaxTokens) {
+          if (variant.name === 'tiny') break;
+          continue;
+        }
+        
+        if (isRetryableGeminiError(error)) break;
+        break;
+      }
     }
+    if (lastError && isRetryableGeminiError(lastError)) continue;
+    break;
   }
 
   const err = new Error('Failed to generate text');

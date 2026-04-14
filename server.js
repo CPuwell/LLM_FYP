@@ -30,11 +30,7 @@ fs.mkdirSync(generatedDir, { recursive: true });
 app.use('/generated', express.static(generatedDir));
 
 const serverOrigin = process.env.SERVER_ORIGIN || `http://localhost:${port}`;
-const hfToken = process.env.HF_TOKEN || '';
-const hfImageModel = process.env.HF_IMAGE_MODEL || 'stabilityai/stable-diffusion-2-1';
-const cfAccountId = process.env.CF_ACCOUNT_ID || '';
-const cfApiToken = process.env.CF_API_TOKEN || '';
-const cfImageModel = process.env.CF_IMAGE_MODEL || '@cf/stabilityai/stable-diffusion-xl-base-1.0';
+const geminiImageModel = process.env.GEMINI_IMAGE_MODEL || 'imagen-4.0-fast-generate-001';
 
 const getExtFromContentType = (contentType) => {
   const ct = (contentType || '').toLowerCase();
@@ -45,12 +41,38 @@ const getExtFromContentType = (contentType) => {
   return 'bin';
 };
 
+const sniffImageContentType = (buffer) => {
+  if (!buffer || buffer.length < 12) return 'application/octet-stream';
+  if (
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4E &&
+    buffer[3] === 0x47 &&
+    buffer[4] === 0x0D &&
+    buffer[5] === 0x0A &&
+    buffer[6] === 0x1A &&
+    buffer[7] === 0x0A
+  ) return 'image/png';
+  if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) return 'image/jpeg';
+  if (
+    buffer[0] === 0x52 &&
+    buffer[1] === 0x49 &&
+    buffer[2] === 0x46 &&
+    buffer[3] === 0x46 &&
+    buffer[8] === 0x57 &&
+    buffer[9] === 0x45 &&
+    buffer[10] === 0x42 &&
+    buffer[11] === 0x50
+  ) return 'image/webp';
+  return 'application/octet-stream';
+};
+
 const saveBufferToGenerated = (buffer, contentType) => {
   const ext = getExtFromContentType(contentType);
   const name = `${Date.now()}-${crypto.randomBytes(8).toString('hex')}.${ext}`;
   const outPath = path.join(generatedDir, name);
   fs.writeFileSync(outPath, buffer);
-  return `${serverOrigin}/generated/${name}`;
+  return `/generated/${name}`;
 };
 
 // 配置 Google Gemini API
@@ -79,7 +101,7 @@ const getGeminiKeyFromRequest = (req) => {
   return { key: '', source: 'none' };
 };
 
-const getGenAIForRequest = (req) => {
+const getGenAIForRequest = (req) => { 
   const { key, source } = getGeminiKeyFromRequest(req);
   if (!key) return { genAI: null, keySource: source };
   if (source === 'env') return { genAI, keySource: source };
@@ -215,7 +237,7 @@ app.post('/api/generate', async (req, res) => {
     }
     const { title, storyContext, userPrompt, worldBible, location, memory } = validateGenerateRequest(req.body);
     console.log(`[Text Gen] Request for: ${title}`);
-    const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash-001", "gemini-2.0-flash-lite-001"];
+    const modelsToTry = ["gemini-2.5-flash-lite", "gemini-2.5-flash"];
     const out = await generateSceneText({
       genAI: reqGenAI,
       modelsToTry,
@@ -248,7 +270,7 @@ app.post('/api/generate-player', async (req, res) => {
     const { title, storyContext, userPrompt, worldBible, location, memory } = validateGenerateRequest(body);
     const attributes = body?.attributes && typeof body.attributes === 'object' ? body.attributes : {};
     const playerState = `Attributes: ${JSON.stringify(attributes).slice(0, 2500)}`;
-    const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash-001", "gemini-2.0-flash-lite-001"];
+    const modelsToTry = ["gemini-2.5-flash-lite", "gemini-2.5-flash"];
     const out = await generateSceneText({
       genAI: reqGenAI,
       modelsToTry,
@@ -284,7 +306,7 @@ app.post('/api/update-memory', async (req, res) => {
     if (!events.length) {
       return res.status(400).json({ error: 'Bad request', details: 'events is required' });
     }
-    const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash-001", "gemini-2.0-flash-lite-001"];
+    const modelsToTry = ["gemini-2.5-flash-lite", "gemini-2.5-flash"];
     const out = await updateLongTermMemory({ genAI: reqGenAI, modelsToTry, memory, events });
     return res.json(out);
   } catch (error) {
@@ -298,152 +320,104 @@ app.post('/api/update-memory', async (req, res) => {
 
 // 2. 图片生成 API
 app.post('/api/generate-image', async (req, res) => {
-  const { description } = req.body;
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { description } = body;
   console.log(`[Image Gen] Request received for: ${String(description ?? '').slice(0, 30)}...`);
 
   try {
-    const raw = (description ?? '').toString();
-    const cleaned = raw.replace(/[^\w\s,.'"-]/g, ' ').replace(/\s+/g, ' ').trim();
-    const prompt = cleaned.slice(0, 400);
+    const rawDesc = (description ?? '').toString();
+    const descClean = rawDesc.replace(/[^\w\s,.'"-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 520);
+    const storyContext = (body?.storyContext ?? '').toString();
+    const storyClean = storyContext.replace(/[^\w\s,.'"-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 420);
+    const title = (body?.title ?? '').toString();
+    const titleClean = title.replace(/[^\w\s,.'"-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+    const location = (body?.location ?? '').toString();
+    const locationClean = location.replace(/[^\w\s,.'"-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+    const tone = (body?.tone ?? '').toString();
+    const toneClean = tone.replace(/[^\w\s,.'"-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
+    const styleGuide = (body?.styleGuide ?? '').toString();
+    const styleGuideClean = styleGuide.replace(/[^\w\s,.'"-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 280);
 
-    const generateProceduralSvg = () => {
-      const h = crypto.createHash('sha256').update(prompt || 'scene').digest();
-      const r = (i) => h[i] / 255;
-      const skyHue = Math.floor(190 + r(0) * 50);
-      const skySat = Math.floor(45 + r(1) * 25);
-      const skyLum1 = Math.floor(20 + r(2) * 25);
-      const skyLum2 = Math.floor(35 + r(3) * 25);
-      const sunX = Math.floor(80 + r(4) * 340);
-      const sunY = Math.floor(70 + r(5) * 170);
-      const sunR = Math.floor(28 + r(6) * 26);
-      const groundHue = Math.floor(90 + r(7) * 40);
-      const groundSat = Math.floor(25 + r(8) * 35);
-      const groundLum = Math.floor(12 + r(9) * 18);
-      const accentHue = Math.floor(10 + r(10) * 40);
-      const accentSat = Math.floor(70 + r(11) * 25);
-      const accentLum = Math.floor(55 + r(12) * 20);
-      const hasVillage = /village|town|tavern|market|street|inn/i.test(prompt);
-      const hasForest = /forest|woods|tree|woodland/i.test(prompt);
-      const hasMountain = /mountain|hill|cliff/i.test(prompt);
+    const stylePreset = 'Cinematic, gritty survival horror. Nighttime. Low-key lighting. Desaturated color palette. 35mm film look, subtle film grain. Realistic. No text, no logos, no watermarks.';
+    const parts = [
+      `STYLE: ${stylePreset}`,
+      storyClean ? `STORY CONTEXT: ${storyClean}` : '',
+      toneClean ? `TONE: ${toneClean}` : '',
+      styleGuideClean ? `STYLE GUIDE: ${styleGuideClean}` : '',
+      titleClean ? `SCENE: ${titleClean}` : '',
+      locationClean ? `LOCATION: ${locationClean}` : '',
+      descClean ? `VISUAL DESCRIPTION: ${descClean}` : '',
+    ].filter(Boolean);
+    const prompt = parts.join('\n').slice(0, 1200);
 
-      const houses = hasVillage
-        ? Array.from({ length: 6 }, (_, i) => {
-            const x = 50 + i * 75 + Math.floor(r(13 + i) * 18);
-            const y = 320 + Math.floor(r(19 + i) * 40);
-            const w = 44 + Math.floor(r(25 + i) * 18);
-            const h1 = 34 + Math.floor(r(31 + i) * 26);
-            const roof = `M ${x - 2} ${y} L ${x + w / 2} ${y - 22} L ${x + w + 2} ${y} Z`;
-            const body = `<rect x="${x}" y="${y}" width="${w}" height="${h1}" rx="3" fill="rgba(20,20,22,0.65)" stroke="rgba(255,255,255,0.12)" />`;
-            const roofEl = `<path d="${roof}" fill="rgba(10,10,12,0.75)" stroke="rgba(255,255,255,0.10)" />`;
-            const winX = x + 10 + Math.floor(r(37 + i) * 8);
-            const winY = y + 10 + Math.floor(r(43 + i) * 10);
-            const win = `<rect x="${winX}" y="${winY}" width="10" height="10" rx="2" fill="hsl(${accentHue} ${accentSat}% ${accentLum}%)" opacity="0.9" />`;
-            return `${roofEl}${body}${win}`;
-          }).join('')
-        : '';
+    const tryGeminiImagen = async () => {
+      const { key } = getGeminiKeyFromRequest(req);
+      if (!key) return null;
 
-      const trees = hasForest
-        ? Array.from({ length: 10 }, (_, i) => {
-            const x = 20 + i * 55 + Math.floor(r(49 + i) * 20);
-            const y = 260 + Math.floor(r(59 + i) * 70);
-            const cr = 14 + Math.floor(r(69 + i) * 18);
-            const trunkH = 18 + Math.floor(r(79 + i) * 18);
-            const trunkW = 6 + Math.floor(r(89 + i) * 4);
-            const trunk = `<rect x="${x - trunkW / 2}" y="${y + cr - 4}" width="${trunkW}" height="${trunkH}" rx="2" fill="rgba(40,28,20,0.65)" />`;
-            const crown = `<circle cx="${x}" cy="${y}" r="${cr}" fill="rgba(15,35,20,0.55)" stroke="rgba(255,255,255,0.08)" />`;
-            return `${crown}${trunk}`;
-          }).join('')
-        : '';
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiImageModel)}:predict`;
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'x-goog-api-key': key,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            instances: [{ prompt }],
+            parameters: { sampleCount: 1 },
+          }),
+          signal: controller.signal,
+        });
+        const text = await response.text();
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = { raw: text.slice(0, 800) };
+        }
+        if (!response.ok) {
+          const msg = data?.error?.message || data?.error || data?.raw || `Gemini Imagen status ${response.status}`;
+          throw new Error(msg);
+        }
 
-      const mountains = hasMountain
-        ? `<path d="M 0 330 L 120 210 L 240 330 Z" fill="rgba(18,18,22,0.45)" />
-           <path d="M 170 350 L 320 200 L 470 350 Z" fill="rgba(18,18,22,0.35)" />
-           <path d="M 360 340 L 470 235 L 610 340 Z" fill="rgba(18,18,22,0.40)" />`
-        : `<path d="M 0 350 C 140 300 240 380 360 330 C 470 285 560 360 640 320 L 640 512 L 0 512 Z" fill="rgba(18,18,22,0.35)" />`;
+        const pickB64 = (obj) => {
+          if (!obj || typeof obj !== 'object') return '';
+          const b64 =
+            obj?.bytesBase64Encoded ||
+            obj?.imageBytes ||
+            obj?.image?.imageBytes ||
+            obj?.image?.bytesBase64Encoded;
+          return typeof b64 === 'string' ? b64 : '';
+        };
 
-      const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <defs>
-    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="hsl(${skyHue} ${skySat}% ${skyLum2}%)"/>
-      <stop offset="100%" stop-color="hsl(${skyHue} ${Math.max(0, skySat - 10)}% ${skyLum1}%)"/>
-    </linearGradient>
-    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="hsl(${groundHue} ${groundSat}% ${groundLum + 6}%)"/>
-      <stop offset="100%" stop-color="hsl(${groundHue} ${groundSat}% ${groundLum}%)"/>
-    </linearGradient>
-    <radialGradient id="sun" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="hsl(${accentHue} ${accentSat}% ${Math.min(85, accentLum + 20)}%)" stop-opacity="1"/>
-      <stop offset="100%" stop-color="hsl(${accentHue} ${accentSat}% ${accentLum}%)" stop-opacity="0"/>
-    </radialGradient>
-    <filter id="blur" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="1.6" />
-    </filter>
-  </defs>
-  <rect width="512" height="512" fill="url(#sky)"/>
-  <circle cx="${sunX}" cy="${sunY}" r="${sunR * 2.2}" fill="url(#sun)" opacity="0.85" filter="url(#blur)"/>
-  <circle cx="${sunX}" cy="${sunY}" r="${sunR}" fill="hsl(${accentHue} ${accentSat}% ${accentLum}%)" opacity="0.9"/>
-  ${mountains}
-  <rect y="330" width="512" height="182" fill="url(#ground)"/>
-  <g opacity="0.95">${trees}</g>
-  <g opacity="0.95">${houses}</g>
-</svg>`;
+        const b64 =
+          (Array.isArray(data?.predictions) && data.predictions.length ? pickB64(data.predictions[0]) : '') ||
+          (Array.isArray(data?.generatedImages) && data.generatedImages.length ? pickB64(data.generatedImages[0]) : '') ||
+          (Array.isArray(data?.generated_images) && data.generated_images.length ? pickB64(data.generated_images[0]) : '') ||
+          '';
 
-      return svg;
-    };
-
-    const tryCloudflare = async () => {
-      if (!cfAccountId || !cfApiToken) return null;
-      const url = `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/ai/run/${cfImageModel}`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${cfApiToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ prompt })
-      });
-      if (!response.ok) throw new Error(`Cloudflare status ${response.status}`);
-      const contentType = response.headers.get('content-type') || 'image/png';
-      const buffer = Buffer.from(await response.arrayBuffer());
-      return saveBufferToGenerated(buffer, contentType);
-    };
-
-    const tryHuggingFace = async () => {
-      if (!hfToken) return null;
-      const url = `https://api-inference.huggingface.co/models/${hfImageModel}`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${hfToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ inputs: prompt })
-      });
-      if (!response.ok) throw new Error(`HuggingFace status ${response.status}`);
-      const contentType = response.headers.get('content-type') || 'image/png';
-      const buffer = Buffer.from(await response.arrayBuffer());
-      return saveBufferToGenerated(buffer, contentType);
+        if (!b64) throw new Error('Gemini Imagen returned no image bytes');
+        const buffer = Buffer.from(b64, 'base64');
+        const contentType = sniffImageContentType(buffer);
+        return saveBufferToGenerated(buffer, contentType);
+      } catch (e) {
+        if (e?.name === 'AbortError') throw new Error('Gemini Imagen timeout');
+        throw e;
+      } finally {
+        clearTimeout(timeout);
+      }
     };
 
     let imageUrl = null;
     try {
-      imageUrl = await tryCloudflare();
+      imageUrl = await tryGeminiImagen();
       if (imageUrl) return res.json({ imageUrl });
     } catch (e) {
-      console.warn(`[Image Gen] Cloudflare failed: ${e.message}`);
+      console.warn(`[Image Gen] Gemini Imagen failed: ${e.message}`);
     }
-
-    try {
-      imageUrl = await tryHuggingFace();
-      if (imageUrl) return res.json({ imageUrl });
-    } catch (e) {
-      console.warn(`[Image Gen] HuggingFace failed: ${e.message}`);
-    }
-
-    const svg = generateProceduralSvg();
-    const svgUrl = saveBufferToGenerated(Buffer.from(svg, 'utf8'), 'image/svg+xml');
-    return res.json({ imageUrl: svgUrl });
+    return res.status(502).json({ error: 'Failed to generate image', details: 'Gemini Imagen failed' });
 
   } catch (error) {
     console.error('Image Gen Error:', error);

@@ -297,8 +297,15 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
     try {
       const response = await fetch(`${apiBaseUrl}/api/generate-image`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description: selectedNode.data.description }),
+        headers: { 'Content-Type': 'application/json', ...buildGeminiKeyHeader() },
+        body: JSON.stringify({
+          description: selectedNode.data.description,
+          title: selectedNode.data.label,
+          location: selectedNode?.data?.location || '',
+          storyContext: storyContext || '',
+          tone: worldBible?.tone || '',
+          styleGuide: worldBible?.styleGuide || '',
+        }),
       });
       if (!response.ok) {
         appendEvaluationLog({
@@ -367,7 +374,8 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
   };
 
   if (selectedNode) {
-    const dynamicDescriptionEnabled = selectedNode?.data?.dynamicDescriptionEnabled !== false;
+    const dynamicDescriptionEnabled = Boolean(selectedNode?.data?.dynamicDescriptionEnabled);
+    const dynamicImageEnabled = Boolean(selectedNode?.data?.dynamicImageEnabled);
     return (
       <aside className="sidebar" style={{ width: Number.isFinite(sidebarWidth) ? `${sidebarWidth}px` : undefined }}>
         <div
@@ -417,6 +425,13 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
           onChange={(e) => onDataChange({ dynamicDescriptionEnabled: e.target.checked })}
         />
 
+        <label>Dynamic Image (Player Mode):</label>
+        <input
+          type="checkbox"
+          checked={dynamicImageEnabled}
+          onChange={(e) => onDataChange({ dynamicImageEnabled: e.target.checked })}
+        />
+
         <label>Description:</label>
         <div className="description-header">
           <button onClick={handleTextGenerate} disabled={isTextLoading} className="generate-btn">
@@ -436,7 +451,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
           }}
           placeholder='{"hp":10,"hasKey":true}'
         />
-        <button onClick={handlePlayerPreviewGenerate} disabled={!dynamicDescriptionEnabled || isPlayerPreviewLoading} className="generate-btn">
+        <button onClick={handlePlayerPreviewGenerate} disabled={isPlayerPreviewLoading} className="generate-btn">
           {isPlayerPreviewLoading ? 'Previewing...' : '👁 Preview Player Description'}
         </button>
         {playerPreviewText ? (

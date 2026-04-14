@@ -1,10 +1,11 @@
 // src/PlayerView.jsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import './PlayerView.css'; 
 import { getDisplayImageUrl } from './imageUtils.js';
 import { applyEffects, evaluateConditions } from './attributeEngine.js';
 import { appendEvaluationLog, getEvaluationLogs } from './evaluationLog.js';
 import { getStoryMemory, pickMemoryUpdateLogs, resetStoryMemory, selectFactsForScene, setStoryMemory } from './storyMemory.js';
+import { getApiBaseUrl } from './apiBaseUrl.js';
 import { buildGeminiKeyHeader } from './userApiKey.js';
 
 export default function PlayerView({ nodes, edges, storyContext, worldBible, onExit, initialNodeId = '1' }) {
@@ -13,19 +14,32 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
   const [usedChoiceIds, setUsedChoiceIds] = useState(() => new Set());
   const [attributes, setAttributes] = useState({});
   const attributesRef = useRef({});
+  const lastEnteredNodeIdRef = useRef(null);
+  const enterGateRef = useRef({ nodeId: '', enterTs: '', deadlineMs: 0 });
+  const enterGateTimeoutRef = useRef(null);
+  const [enterGateTick, setEnterGateTick] = useState(0);
+  const [memoryEpoch, setMemoryEpoch] = useState(0);
   const [appliedNodeEffectIds, setAppliedNodeEffectIds] = useState(() => new Set());
   const [choiceFeedback, setChoiceFeedback] = useState(null);
   const choiceFeedbackTimeoutRef = useRef(null);
   const memoryUpdateTimeoutRef = useRef(null);
   const memoryUpdateInFlightRef = useRef(false);
-  const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+  const apiBaseUrl = getApiBaseUrl();
   const playerGenAbortRef = useRef(null);
   const playerGenCacheRef = useRef(new Map());
+  const imageGenAbortRef = useRef(null);
+  const imageGenCacheRef = useRef(new Map());
 
   const [currentNode, setCurrentNode] = useState(null);
   const [currentChoices, setCurrentChoices] = useState([]);
   const [runtimeDescription, setRuntimeDescription] = useState('');
   const [isRuntimeGenerating, setIsRuntimeGenerating] = useState(false);
+  const [runtimeImageUrl, setRuntimeImageUrl] = useState('');
+  const [isRuntimeImageGenerating, setIsRuntimeImageGenerating] = useState(false);
+  const nodesSig = useMemo(
+    () => (Array.isArray(nodes) ? nodes.map((n) => String(n?.id || '')).join('|') : ''),
+    [nodes],
+  );
 
   useEffect(() => {
     attributesRef.current = attributes;
@@ -40,9 +54,17 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
       window.clearTimeout(memoryUpdateTimeoutRef.current);
       memoryUpdateTimeoutRef.current = null;
     }
+    if (enterGateTimeoutRef.current) {
+      window.clearTimeout(enterGateTimeoutRef.current);
+      enterGateTimeoutRef.current = null;
+    }
     if (playerGenAbortRef.current) {
       playerGenAbortRef.current.abort();
       playerGenAbortRef.current = null;
+    }
+    if (imageGenAbortRef.current) {
+      imageGenAbortRef.current.abort();
+      imageGenAbortRef.current = null;
     }
   }, []);
 
@@ -53,11 +75,21 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
     setHistory([]);
     setUsedChoiceIds(new Set());
     setAttributes({});
+    setMemoryEpoch(0);
+    lastEnteredNodeIdRef.current = null;
+    enterGateRef.current = { nodeId: '', enterTs: '', deadlineMs: 0 };
+    if (enterGateTimeoutRef.current) {
+      window.clearTimeout(enterGateTimeoutRef.current);
+      enterGateTimeoutRef.current = null;
+    }
     setAppliedNodeEffectIds(new Set());
     setChoiceFeedback(null);
     setRuntimeDescription('');
     setIsRuntimeGenerating(false);
+    setRuntimeImageUrl('');
+    setIsRuntimeImageGenerating(false);
     playerGenCacheRef.current = new Map();
+    imageGenCacheRef.current = new Map();
     resetStoryMemory();
     if (choiceFeedbackTimeoutRef.current) {
       window.clearTimeout(choiceFeedbackTimeoutRef.current);
@@ -71,7 +103,11 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
       playerGenAbortRef.current.abort();
       playerGenAbortRef.current = null;
     }
-  }, [initialNodeId, nodes]);
+    if (imageGenAbortRef.current) {
+      imageGenAbortRef.current.abort();
+      imageGenAbortRef.current = null;
+    }
+  }, [initialNodeId, nodesSig]);
 
   // Update currentNode and currentChoices whenever currentNodeId changes
   useEffect(() => {
@@ -146,6 +182,10 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
           lastProcessedLogTs: lastLogTs || '',
           runId: memory.runId,
         });
+        setMemoryEpoch((x) => x + 1);
+        if (enterGateRef.current?.nodeId === currentNodeId) {
+          setEnterGateTick((x) => x + 1);
+        }
         appendEvaluationLog({
           type: 'ai_memory_update_success',
           durationMs: Math.round(performance.now() - startedAt),
@@ -167,7 +207,31 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
   useEffect(() => {
     const node = nodes?.find((n) => n.id === currentNodeId);
     if (!node) return;
-    const dynamicDescriptionEnabled = node?.data?.dynamicDescriptionEnabled !== false;
+    if (lastEnteredNodeIdRef.current === node.id) return;
+    lastEnteredNodeIdRef.current = node.id;
+    const nextLogs = appendEvaluationLog({
+      type: 'play_enter',
+      nodeId: node.id,
+      title: node?.data?.label || '',
+      location: node?.data?.location || '',
+      descriptionSnippet: String(node?.data?.description || '').slice(0, 220),
+      attributesSnapshot: attributesRef.current,
+    });
+    const enterTs = typeof nextLogs?.[nextLogs.length - 1]?.ts === 'string' ? nextLogs[nextLogs.length - 1].ts : '';
+    enterGateRef.current = { nodeId: node.id, enterTs, deadlineMs: performance.now() + 1800 };
+    if (enterGateTimeoutRef.current) window.clearTimeout(enterGateTimeoutRef.current);
+    enterGateTimeoutRef.current = window.setTimeout(() => {
+      if (enterGateRef.current?.nodeId === node.id) {
+        setEnterGateTick((x) => x + 1);
+      }
+    }, 1900);
+    scheduleMemoryUpdate();
+  }, [currentNodeId, nodesSig]);
+
+  useEffect(() => {
+    const node = nodes?.find((n) => n.id === currentNodeId);
+    if (!node) return;
+    const dynamicDescriptionEnabled = Boolean(node?.data?.dynamicDescriptionEnabled);
     if (!dynamicDescriptionEnabled) {
       if (playerGenAbortRef.current) {
         playerGenAbortRef.current.abort();
@@ -176,9 +240,30 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
       setRuntimeDescription('');
       setIsRuntimeGenerating(false);
     } else {
+    const effectId = `node:${node.id}`;
+    if (node?.data?.onEnterEffects && !appliedNodeEffectIds.has(effectId)) {
+      setIsRuntimeGenerating(true);
+      return;
+    }
+    const gate = enterGateRef.current;
     const memory = getStoryMemory();
+    if (gate?.nodeId === node.id && gate.enterTs) {
+      const processedAt = Date.parse(memory.lastProcessedLogTs || '');
+      const enteredAt = Date.parse(gate.enterTs || '');
+      const ready = Number.isFinite(processedAt) && Number.isFinite(enteredAt) && processedAt >= enteredAt;
+      const expired = performance.now() >= (gate.deadlineMs || 0);
+      if (!ready && !expired) {
+        setIsRuntimeGenerating(true);
+        return;
+      }
+      enterGateRef.current = { nodeId: '', enterTs: '', deadlineMs: 0 };
+      if (enterGateTimeoutRef.current) {
+        window.clearTimeout(enterGateTimeoutRef.current);
+        enterGateTimeoutRef.current = null;
+      }
+    }
     const selectedFacts = selectFactsForScene(memory, { title: node?.data?.label || '', location: node?.data?.location || '', limit: 8 });
-    const cacheKey = `${node.id}|${JSON.stringify(attributesRef.current)}|${JSON.stringify(selectedFacts)}`;
+    const cacheKey = `${node.id}|${JSON.stringify(attributes)}|${JSON.stringify(selectedFacts)}|${String(memory.summary || '').slice(0, 600)}`;
     const cached = playerGenCacheRef.current.get(cacheKey);
     if (cached && typeof cached === 'string') {
       setRuntimeDescription(cached);
@@ -194,6 +279,8 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
         nodeId: node.id,
         title: node?.data?.label || '',
         location: node?.data?.location || '',
+        storyContextLength: (storyContext || '').length,
+        userPromptLength: (node?.data?.setting || '').length,
         memorySummaryLength: (memory.summary || '').length,
         memoryFactsCount: Array.isArray(selectedFacts) ? selectedFacts.length : 0,
       });
@@ -207,7 +294,7 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
           worldBible: worldBible || null,
           location: node?.data?.location || '',
           memory: { summary: memory.summary, facts: selectedFacts },
-          attributes: attributesRef.current,
+          attributes,
         }),
         signal: controller.signal,
       })
@@ -232,6 +319,9 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
             title: node?.data?.label || '',
             durationMs: Math.round(performance.now() - startedAt),
             model: data?.meta?.model || '',
+            memoryFactsCount: data?.meta?.memoryFactsCount,
+            memorySummaryLength: data?.meta?.memorySummaryLength,
+            playerStateLength: data?.meta?.playerStateLength,
           });
         })
         .catch((e) => {
@@ -251,16 +341,109 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
         });
     }
     }
+  }, [currentNodeId, storyContext, worldBible, attributes, nodesSig, enterGateTick, appliedNodeEffectIds]);
+
+  useEffect(() => {
+    const node = nodes?.find((n) => n.id === currentNodeId);
+    if (!node) return;
+
+    const dynamicImageEnabled = Boolean(node?.data?.dynamicImageEnabled);
+    if (!dynamicImageEnabled) {
+      if (imageGenAbortRef.current) {
+        imageGenAbortRef.current.abort();
+        imageGenAbortRef.current = null;
+      }
+      setRuntimeImageUrl('');
+      setIsRuntimeImageGenerating(false);
+      return;
+    }
+
+    const baseDesc = (runtimeDescription || node?.data?.description || '').toString().trim();
+    if (!baseDesc) return;
+    const dynamicDescriptionEnabled = Boolean(node?.data?.dynamicDescriptionEnabled);
+    if (isRuntimeGenerating && dynamicDescriptionEnabled) return;
+
+    const styleKey = `${(storyContext || '').slice(0, 220)}|${(worldBible?.tone || '').slice(0, 120)}|${(worldBible?.styleGuide || '').slice(0, 160)}|${node?.data?.location || ''}`;
+    const cacheKey = `${node.id}|${baseDesc}|${styleKey}`;
+    const cached = imageGenCacheRef.current.get(cacheKey);
+    if (cached && typeof cached === 'string') {
+      setRuntimeImageUrl(cached);
+      setIsRuntimeImageGenerating(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    if (imageGenAbortRef.current) imageGenAbortRef.current.abort();
+    imageGenAbortRef.current = controller;
+    setIsRuntimeImageGenerating(true);
+    const startedAt = performance.now();
     appendEvaluationLog({
-      type: 'play_enter',
+      type: 'ai_generate_player_image_start',
       nodeId: node.id,
       title: node?.data?.label || '',
-      location: node?.data?.location || '',
-      descriptionSnippet: String(node?.data?.description || '').slice(0, 220),
-      attributesSnapshot: attributesRef.current,
+      descriptionLength: baseDesc.length,
     });
-    scheduleMemoryUpdate();
-  }, [currentNodeId]);
+    fetch(`${apiBaseUrl}/api/generate-image`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...buildGeminiKeyHeader() },
+      body: JSON.stringify({
+        description: baseDesc,
+        title: node?.data?.label || '',
+        location: node?.data?.location || '',
+        storyContext: storyContext || '',
+        tone: worldBible?.tone || '',
+        styleGuide: worldBible?.styleGuide || '',
+      }),
+      signal: controller.signal,
+    })
+      .then(async (r) => {
+        if (!r.ok) {
+          let errorData = {};
+          let errorText = '';
+          try {
+            errorData = await r.clone().json();
+          } catch {
+            try {
+              errorText = await r.text();
+            } catch {
+            }
+          }
+          const msg = errorData.details || errorData.error || (errorText ? errorText.slice(0, 260) : '') || `HTTP ${r.status}`;
+          throw new Error(msg);
+        }
+        return r.json();
+      })
+      .then((data) => {
+        const url = typeof data?.imageUrl === 'string' ? data.imageUrl : '';
+        if (url) {
+          imageGenCacheRef.current.set(cacheKey, url);
+          setRuntimeImageUrl(url);
+        } else {
+          setRuntimeImageUrl('');
+        }
+        appendEvaluationLog({
+          type: 'ai_generate_player_image_success',
+          nodeId: node.id,
+          title: node?.data?.label || '',
+          durationMs: Math.round(performance.now() - startedAt),
+        });
+      })
+      .catch((e) => {
+        if (e?.name === 'AbortError') return;
+        appendEvaluationLog({
+          type: 'ai_generate_player_image_error',
+          nodeId: node.id,
+          title: node?.data?.label || '',
+          durationMs: Math.round(performance.now() - startedAt),
+          error: e?.message || 'Unknown error',
+        });
+        setRuntimeImageUrl('');
+      })
+      .finally(() => {
+        if (imageGenAbortRef.current === controller) imageGenAbortRef.current = null;
+        setIsRuntimeImageGenerating(false);
+      });
+  }, [currentNodeId, runtimeDescription, isRuntimeGenerating, nodes]);
 
   const getChoiceDisabledReason = (edge) => {
     if (!edge) return null;
@@ -335,6 +518,7 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
     setAttributes({});
     setAppliedNodeEffectIds(new Set());
     setChoiceFeedback(null);
+    lastEnteredNodeIdRef.current = null;
     if (choiceFeedbackTimeoutRef.current) {
       window.clearTimeout(choiceFeedbackTimeoutRef.current);
       choiceFeedbackTimeoutRef.current = null;
@@ -368,6 +552,16 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
     );
   }
 
+  const dynamicDescriptionEnabled = Boolean(currentNode?.data?.dynamicDescriptionEnabled);
+  const dynamicImageEnabled = Boolean(currentNode?.data?.dynamicImageEnabled);
+  const showDescriptionText = dynamicDescriptionEnabled ? (!isRuntimeGenerating && runtimeDescription) : '';
+  const displayedImageUrl = dynamicImageEnabled ? (runtimeImageUrl || '') : (currentNode.data.imageUrl || '');
+  const isSceneBusy = (dynamicDescriptionEnabled && isRuntimeGenerating) || (dynamicImageEnabled && isRuntimeImageGenerating);
+  const displayedDescription = isSceneBusy
+    ? ''
+    : (dynamicDescriptionEnabled ? (showDescriptionText || '') : (currentNode.data.description || ''));
+  const loadingText = isRuntimeGenerating ? 'Generating text...' : (isRuntimeImageGenerating ? 'Generating image...' : 'Generating scene...');
+
   return (
     <div className="player-view">
       <div className="player-controls">
@@ -381,17 +575,17 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
             {choiceFeedback}
           </div>
         ) : null}
-        {currentNode.data.imageUrl && (
-          <img src={getDisplayImageUrl(currentNode.data.imageUrl)} alt={currentNode.data.label} className="player-image" />
-        )}
         <h2 className="player-title">{currentNode.data.label}</h2>
-        {isRuntimeGenerating ? (
+        {isSceneBusy ? (
           <div className="player-runtime-loading" role="status" aria-live="polite">
             <div className="player-progress" />
-            <div className="player-runtime-loading-text">Generating scene...</div>
+            <div className="player-runtime-loading-text">{loadingText}</div>
           </div>
         ) : null}
-        <p className="player-description">{runtimeDescription || currentNode.data.description}</p>
+        {displayedImageUrl ? (
+          <img src={getDisplayImageUrl(displayedImageUrl)} alt={currentNode.data.label} className="player-image" />
+        ) : null}
+        <p className="player-description">{displayedDescription}</p>
 
         <div className="player-choices">
           {currentChoices.length > 0 ? (

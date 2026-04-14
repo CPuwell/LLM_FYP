@@ -604,6 +604,19 @@ function App() {
     URL.revokeObjectURL(url);
   }, [nodes, edges, storyContext, worldBible]);
 
+  const exportWorldBible = useCallback(() => {
+    const data = { worldBible };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `world-bible-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [worldBible]);
+
   const exportEvaluationPack = useCallback(() => {
     const analysis = analyzeGraph({ nodes, edges, startNodeId: '1' });
     const logs = getEvaluationLogs();
@@ -779,6 +792,7 @@ function App() {
               <option value="smoothstep">Edges: SmoothStep</option>
             </select>
             <button onClick={exportStory} title="Download as JSON file">Export File</button>
+            <button onClick={exportWorldBible} title="Download world bible only">📘 Export Bible</button>
             <button onClick={exportEvaluationPack} title="Download story + analysis + logs">📦 Eval Pack</button>
             <button onClick={handleImportClick} title="Load from JSON file">Import File</button>
             <input 

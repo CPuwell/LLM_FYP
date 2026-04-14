@@ -106,19 +106,33 @@ export const selectFactsForScene = (memory, { title, location, limit = 8 } = {})
   const scored = facts.map((f) => {
     const t = f.text.toLowerCase();
     const entityLower = (f.entity || '').toLowerCase();
+    const topicLower = (f.topic || '').toLowerCase();
     let s = 0;
     if (locLower && (entityLower === locLower)) s += 10;
     if (locLower && (t.includes(locLower))) s += 6;
-    if ((f.topic || '').toLowerCase() === 'state') s += 3;
-    if ((f.topic || '').toLowerCase() === 'rule') s += 2;
+    if (topicLower === 'item') s += 6;
+    if (topicLower === 'character') s += 6;
+    if (topicLower === 'goal') s += 4;
+    if (topicLower === 'state') s += 3;
+    if (topicLower === 'rule') s += 2;
+    if (topicLower === 'location' && entityLower === 'player') s -= 4;
     for (const w of titleTokens) {
       if (t.includes(w)) s += 1;
     }
     return { f, s };
   });
 
-  return scored
+  const want = Math.max(0, Math.min(20, limit));
+  if (!want) return [];
+
+  const recentCount = Math.min(3, want, facts.length);
+  const recent = recentCount ? facts.slice(-recentCount) : [];
+  const recentKey = new Set(recent.map((f) => `${f.topic}::${f.entity}::${f.text}`));
+
+  const ranked = scored
     .sort((a, b) => b.s - a.s)
-    .slice(0, Math.max(0, Math.min(20, limit)))
-    .map((x) => x.f);
+    .map((x) => x.f)
+    .filter((f) => !recentKey.has(`${f.topic}::${f.entity}::${f.text}`));
+
+  return [...recent, ...ranked].slice(0, want);
 };
