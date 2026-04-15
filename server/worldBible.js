@@ -35,6 +35,52 @@ export const buildWorldBibleSnippet = (wb, queryText, selectedLocationName, opts
   const characterLimit = Number.isFinite(opts.characterLimit) ? opts.characterLimit : 6;
 
   const q = asString(queryText).toLowerCase();
+  const queryWords = Array.from(new Set(q.split(/[^a-z0-9]+/).filter((p) => p.length >= 4)));
+
+  const isNearMatch = (a, b) => {
+    const s1 = asString(a).toLowerCase();
+    const s2 = asString(b).toLowerCase();
+    if (!s1 || !s2) return false;
+    if (s1 === s2) return true;
+    if (Math.abs(s1.length - s2.length) > 1) return false;
+    if (s1.length === s2.length) {
+      let diffs = 0;
+      let firstDiff = -1;
+      for (let i = 0; i < s1.length; i += 1) {
+        if (s1[i] !== s2[i]) {
+          diffs += 1;
+          if (firstDiff === -1) firstDiff = i;
+          if (diffs > 2) return false;
+        }
+      }
+      if (diffs === 1) return true;
+      if (diffs === 2 && firstDiff !== -1) {
+        const i = firstDiff;
+        if (i + 1 < s1.length
+          && s1[i] === s2[i + 1]
+          && s1[i + 1] === s2[i]
+          && s1.slice(0, i) === s2.slice(0, i)
+          && s1.slice(i + 2) === s2.slice(i + 2)
+        ) return true;
+      }
+      return false;
+    }
+    const [longer, shorter] = s1.length > s2.length ? [s1, s2] : [s2, s1];
+    let i = 0;
+    let j = 0;
+    let skipped = 0;
+    while (i < longer.length && j < shorter.length) {
+      if (longer[i] === shorter[j]) {
+        i += 1;
+        j += 1;
+        continue;
+      }
+      skipped += 1;
+      if (skipped > 1) return false;
+      i += 1;
+    }
+    return true;
+  };
   const data = normalizeWorldBible(wb);
   const selected = asString(selectedLocationName).trim();
   const selectedLower = selected.toLowerCase();
@@ -48,6 +94,22 @@ export const buildWorldBibleSnippet = (wb, queryText, selectedLocationName, opts
     if (!name && !desc) return 0;
     let score = 0;
     if (name && q.includes(name)) score += 16;
+    if (name && !q.includes(name)) {
+      const parts = name.split(/[^a-z0-9]+/).filter((p) => p.length >= 4);
+      for (const w of queryWords) {
+        if (isNearMatch(w, name)) {
+          score += 10;
+          break;
+        }
+        for (const p of parts) {
+          if (isNearMatch(w, p)) {
+            score += 6;
+            break;
+          }
+        }
+        if (score >= 10) break;
+      }
+    }
     for (const p of terms(name)) {
       if (q.includes(p)) score += 3;
     }
@@ -100,4 +162,3 @@ export const buildWorldBibleSnippet = (wb, queryText, selectedLocationName, opts
   const out = lines.join('\n').trim();
   return out.length > maxChars ? out.slice(0, maxChars) : out;
 };
-

@@ -225,6 +225,7 @@ export const generateSceneText = async ({
           temperature: 0.5,
           topP: 0.9,
           maxOutputTokens: 2048,
+          responseMimeType: 'application/json',
         };
         const model = genAI.getGenerativeModel({
           model: modelName,
@@ -264,6 +265,7 @@ export const generateSceneText = async ({
               temperature: 0.0,
               topP: 0.1,
               maxOutputTokens: 1024,
+              responseMimeType: 'application/json',
             },
           });
           const finishReason = response.candidates?.[0]?.finishReason;

@@ -1,6 +1,13 @@
 const STORAGE_KEY = 'evaluationLogs';
 const SESSION_KEY = 'evaluationSessionId';
 
+const notifyUpdate = () => {
+  try {
+    window.dispatchEvent(new Event('evaluationLogsUpdated'));
+  } catch {
+  }
+};
+
 const safeJsonParse = (raw, fallback) => {
   try {
     return JSON.parse(raw);
@@ -19,7 +26,9 @@ const getOrCreateSessionId = () => {
 
 export const resetEvaluationSession = () => {
   localStorage.removeItem(SESSION_KEY);
-  return getOrCreateSessionId();
+  const next = getOrCreateSessionId();
+  notifyUpdate();
+  return next;
 };
 
 export const getEvaluationSessionId = () => getOrCreateSessionId();
@@ -32,6 +41,7 @@ export const getEvaluationLogs = () => {
 
 export const clearEvaluationLogs = () => {
   localStorage.removeItem(STORAGE_KEY);
+  notifyUpdate();
 };
 
 export const appendEvaluationLog = (entry) => {
@@ -46,5 +56,6 @@ export const appendEvaluationLog = (entry) => {
     },
   ].slice(-2000);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  notifyUpdate();
   return next;
 };

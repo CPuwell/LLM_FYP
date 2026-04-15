@@ -47,3 +47,14 @@
   line-height: 1.4;
 }
 
+.guide-code {
+  margin: 8px 0 0 0;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

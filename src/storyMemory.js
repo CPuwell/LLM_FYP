@@ -79,12 +79,14 @@ export const resetStoryMemory = () => {
   return next;
 };
 
-export const pickMemoryUpdateLogs = (logs, sinceIsoTs, limit = 20) => {
+export const pickMemoryUpdateLogs = (logs, sinceIsoTs, limit = 20, sessionId = '') => {
   const list = Array.isArray(logs) ? logs : [];
   const since = sinceIsoTs ? Date.parse(sinceIsoTs) : 0;
+  const sid = (sessionId || '').toString();
   const picked = [];
   for (let i = list.length - 1; i >= 0; i -= 1) {
     const e = list[i];
+    if (sid && typeof e?.sessionId === 'string' && e.sessionId !== sid) continue;
     const tsIso = typeof e?.ts === 'string' ? e.ts : '';
     const ts = tsIso ? Date.parse(tsIso) : 0;
     if (since && ts && ts <= since) break;

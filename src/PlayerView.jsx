@@ -3,27 +3,37 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import './PlayerView.css'; 
 import { getDisplayImageUrl } from './imageUtils.js';
 import { applyEffects, evaluateConditions } from './attributeEngine.js';
-import { appendEvaluationLog, getEvaluationLogs } from './evaluationLog.js';
+import { appendEvaluationLog, clearEvaluationLogs, getEvaluationLogs, getEvaluationSessionId, resetEvaluationSession } from './evaluationLog.js';
 import { getStoryMemory, pickMemoryUpdateLogs, resetStoryMemory, selectFactsForScene, setStoryMemory } from './storyMemory.js';
 import { getApiBaseUrl } from './apiBaseUrl.js';
 import { buildGeminiKeyHeader } from './userApiKey.js';
+import { resolveNodeUserPrompt } from './settingResolver.js';
 
 export default function PlayerView({ nodes, edges, storyContext, worldBible, onExit, initialNodeId = '1' }) {
   const [currentNodeId, setCurrentNodeId] = useState(initialNodeId);
   const [history, setHistory] = useState([]);
   const [usedChoiceIds, setUsedChoiceIds] = useState(() => new Set());
   const [attributes, setAttributes] = useState({});
+  const [showAttributes, setShowAttributes] = useState(() => {
+    try {
+      return localStorage.getItem('playerShowAttributes') === '1';
+    } catch {
+      return false;
+    }
+  });
   const attributesRef = useRef({});
   const lastEnteredNodeIdRef = useRef(null);
   const enterGateRef = useRef({ nodeId: '', enterTs: '', deadlineMs: 0 });
   const enterGateTimeoutRef = useRef(null);
   const [enterGateTick, setEnterGateTick] = useState(0);
   const [memoryEpoch, setMemoryEpoch] = useState(0);
+  const [isMemoryUpdating, setIsMemoryUpdating] = useState(false);
   const [appliedNodeEffectIds, setAppliedNodeEffectIds] = useState(() => new Set());
   const [choiceFeedback, setChoiceFeedback] = useState(null);
   const choiceFeedbackTimeoutRef = useRef(null);
   const memoryUpdateTimeoutRef = useRef(null);
   const memoryUpdateInFlightRef = useRef(false);
+  const memoryUpdatePendingRef = useRef(false);
   const apiBaseUrl = getApiBaseUrl();
   const playerGenAbortRef = useRef(null);
   const playerGenCacheRef = useRef(new Map());
@@ -44,6 +54,11 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
   useEffect(() => {
     attributesRef.current = attributes;
   }, [attributes]);
+
+  useEffect(() => {
+    clearEvaluationLogs();
+    resetEvaluationSession();
+  }, []);
 
   useEffect(() => () => {
     if (choiceFeedbackTimeoutRef.current) {
@@ -70,14 +85,19 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
 
   useEffect(() => {
     if (!nodes || nodes.length === 0) return;
+    clearEvaluationLogs();
+    resetEvaluationSession();
     const exists = nodes.some((n) => n.id === initialNodeId);
     setCurrentNodeId(exists ? initialNodeId : nodes[0].id);
     setHistory([]);
     setUsedChoiceIds(new Set());
     setAttributes({});
     setMemoryEpoch(0);
+    setIsMemoryUpdating(false);
     lastEnteredNodeIdRef.current = null;
     enterGateRef.current = { nodeId: '', enterTs: '', deadlineMs: 0 };
+    memoryUpdatePendingRef.current = false;
+    memoryUpdateInFlightRef.current = false;
     if (enterGateTimeoutRef.current) {
       window.clearTimeout(enterGateTimeoutRef.current);
       enterGateTimeoutRef.current = null;
@@ -144,14 +164,21 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
   }, [currentNodeId, nodes]);
 
   const scheduleMemoryUpdate = () => {
+    if (memoryUpdateInFlightRef.current) {
+      memoryUpdatePendingRef.current = true;
+      return;
+    }
     if (memoryUpdateTimeoutRef.current) window.clearTimeout(memoryUpdateTimeoutRef.current);
     memoryUpdateTimeoutRef.current = window.setTimeout(async () => {
       if (memoryUpdateInFlightRef.current) return;
       const memory = getStoryMemory();
       const logs = getEvaluationLogs();
-      const delta = pickMemoryUpdateLogs(logs, memory.lastProcessedLogTs, 20);
+      const sessionId = getEvaluationSessionId();
+      const delta = pickMemoryUpdateLogs(logs, memory.lastProcessedLogTs, 20, sessionId);
       if (!delta.length) return;
       memoryUpdateInFlightRef.current = true;
+      memoryUpdatePendingRef.current = false;
+      setIsMemoryUpdating(true);
       const startedAt = performance.now();
       appendEvaluationLog({
         type: 'ai_memory_update_start',
@@ -159,10 +186,40 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
         lastProcessedLogTs: memory.lastProcessedLogTs || '',
       });
       try {
+        const eventsForMemory = delta.map((e) => {
+          const type = typeof e?.type === 'string' ? e.type : '';
+          if (type === 'play_enter') {
+            return {
+              ts: e.ts,
+              type: 'play_enter',
+              nodeId: e.nodeId,
+              title: e.title,
+              location: e.location,
+              attributesSnapshot: e.attributesSnapshot,
+            };
+          }
+          if (type === 'play_choice') {
+            return {
+              ts: e.ts,
+              type: 'play_choice',
+              fromNodeId: e.fromNodeId,
+              fromTitle: e.fromTitle,
+              choiceId: e.choiceId,
+              choiceText: e.choiceText,
+              toNodeId: e.toNodeId,
+              toTitle: e.toTitle,
+              attributesAfter: e.attributesAfter,
+            };
+          }
+          if (type === 'play_restart') {
+            return { ts: e.ts, type: 'play_restart' };
+          }
+          return { ts: e.ts, type: type || 'unknown' };
+        });
         const response = await fetch(`${apiBaseUrl}/api/update-memory`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...buildGeminiKeyHeader() },
-          body: JSON.stringify({ memory, events: delta }),
+          body: JSON.stringify({ memory, events: eventsForMemory }),
         });
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
@@ -200,6 +257,11 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
         });
       } finally {
         memoryUpdateInFlightRef.current = false;
+        setIsMemoryUpdating(false);
+        if (memoryUpdatePendingRef.current) {
+          memoryUpdatePendingRef.current = false;
+          scheduleMemoryUpdate();
+        }
       }
     }, 900);
   };
@@ -262,8 +324,9 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
         enterGateTimeoutRef.current = null;
       }
     }
+    const resolvedUserPrompt = resolveNodeUserPrompt(node?.data, attributes);
     const selectedFacts = selectFactsForScene(memory, { title: node?.data?.label || '', location: node?.data?.location || '', limit: 8 });
-    const cacheKey = `${node.id}|${JSON.stringify(attributes)}|${JSON.stringify(selectedFacts)}|${String(memory.summary || '').slice(0, 600)}`;
+    const cacheKey = `${node.id}|${resolvedUserPrompt}|${JSON.stringify(attributes)}|${JSON.stringify(selectedFacts)}|${String(memory.summary || '').slice(0, 600)}`;
     const cached = playerGenCacheRef.current.get(cacheKey);
     if (cached && typeof cached === 'string') {
       setRuntimeDescription(cached);
@@ -280,7 +343,7 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
         title: node?.data?.label || '',
         location: node?.data?.location || '',
         storyContextLength: (storyContext || '').length,
-        userPromptLength: (node?.data?.setting || '').length,
+        userPromptLength: resolvedUserPrompt.length,
         memorySummaryLength: (memory.summary || '').length,
         memoryFactsCount: Array.isArray(selectedFacts) ? selectedFacts.length : 0,
       });
@@ -290,7 +353,7 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
         body: JSON.stringify({
           title: node?.data?.label || '',
           storyContext: storyContext || '',
-          userPrompt: node?.data?.setting || '',
+          userPrompt: resolvedUserPrompt,
           worldBible: worldBible || null,
           location: node?.data?.location || '',
           memory: { summary: memory.summary, facts: selectedFacts },
@@ -519,12 +582,17 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
     setAppliedNodeEffectIds(new Set());
     setChoiceFeedback(null);
     lastEnteredNodeIdRef.current = null;
+    clearEvaluationLogs();
+    resetEvaluationSession();
     if (choiceFeedbackTimeoutRef.current) {
       window.clearTimeout(choiceFeedbackTimeoutRef.current);
       choiceFeedbackTimeoutRef.current = null;
     }
     appendEvaluationLog({ type: 'play_restart' });
     resetStoryMemory();
+    setIsMemoryUpdating(false);
+    memoryUpdatePendingRef.current = false;
+    memoryUpdateInFlightRef.current = false;
     setCurrentNodeId(exists ? initialNodeId : nodes[0].id);
   };
 
@@ -561,14 +629,28 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
     ? ''
     : (dynamicDescriptionEnabled ? (showDescriptionText || '') : (currentNode.data.description || ''));
   const loadingText = isRuntimeGenerating ? 'Generating text...' : (isRuntimeImageGenerating ? 'Generating image...' : 'Generating scene...');
+  const handleExit = () => {
+    onExit();
+  };
+  const handleToggleAttributes = () => {
+    setShowAttributes((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('playerShowAttributes', next ? '1' : '0');
+      } catch {
+      }
+      return next;
+    });
+  };
 
   return (
     <div className="player-view">
       <div className="player-controls">
         <button onClick={handleBack} disabled={history.length === 0} className="player-control-button">Back</button>
         <button onClick={handleRestart} className="player-control-button">Restart</button>
+        <button onClick={handleToggleAttributes} className="player-control-button">{showAttributes ? 'Hide Attrs' : 'Show Attrs'}</button>
       </div>
-      <button onClick={onExit} className="exit-button">Exit Player Mode</button>
+      <button onClick={handleExit} className="exit-button">Exit Player Mode</button>
       <div className="player-container">
         {choiceFeedback ? (
           <div className="player-feedback" role="status" aria-live="polite">
@@ -576,6 +658,12 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
           </div>
         ) : null}
         <h2 className="player-title">{currentNode.data.label}</h2>
+        {isMemoryUpdating ? (
+          <div className="player-memory-loading" role="status" aria-live="polite">
+            <div className="player-progress" />
+            <div className="player-runtime-loading-text">Updating memory...</div>
+          </div>
+        ) : null}
         {isSceneBusy ? (
           <div className="player-runtime-loading" role="status" aria-live="polite">
             <div className="player-progress" />
@@ -586,6 +674,12 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
           <img src={getDisplayImageUrl(displayedImageUrl)} alt={currentNode.data.label} className="player-image" />
         ) : null}
         <p className="player-description">{displayedDescription}</p>
+        {showAttributes ? (
+          <div className="player-debug">
+            <div className="player-debug-title">Attributes</div>
+            <pre className="player-debug-pre">{JSON.stringify(attributes || {}, null, 2)}</pre>
+          </div>
+        ) : null}
 
         <div className="player-choices">
           {currentChoices.length > 0 ? (

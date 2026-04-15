@@ -37,6 +37,35 @@ export default function GuideModal({ isOpen, onClose }) {
             <li>Example (Location): "Watchtower of Lorn: crumbling stone tower; blue lantern at the top; wolves avoid it."</li>
           </ul>
 
+          <h3>Setting (Scene Notes)</h3>
+          <ul>
+            <li>Setting is per-node notes: scene background, constraints, and state-based beats</li>
+            <li>In Player Mode, the app resolves conditions using current Attributes and sends only the resolved notes to the AI</li>
+            <li>Prefer writing present facts for this scene (avoid "will/might")</li>
+          </ul>
+
+          <h3>Setting Examples</h3>
+          <ul>
+            <li>Plain text (always included):</li>
+          </ul>
+          <pre className="guide-code">{`Records Corridor: narrow hallway, decaying cabinets, flickering lights.
+damp paper smell, low hum from emergency power.`}</pre>
+          <ul>
+            <li>IF/ELSE text rules (each rule resolves against Attributes):</li>
+          </ul>
+          <pre className="guide-code">{`- IF noise < 3: The corridor is quiet and safe.
+ - ELSE: Something shifts behind you in the dark.
+ - IF firstTimeEnter is true: A battered radio sits on the desk, a weak voice asking for help.`}</pre>
+          <ul>
+            <li>JSON blocks (recommended for precise control):</li>
+          </ul>
+          <pre className="guide-code">{`[
+  { "text": "Records Corridor: decaying cabinets, flickering lights, damp walls." },
+  { "when": { "eq": ["firstTimeEnter", true] }, "text": "A battered radio sits on the desk, a weak voice asking for help." },
+  { "when": { "lt": ["noise", 3] }, "text": "It is quiet for now." },
+  { "when": { "gte": ["noise", 3] }, "text": "A sharp sound echoes behind you." }
+]`}</pre>
+
           <h3>AI Generate</h3>
           <ul>
             <li>✨ Generates a scene description and three suggested actions</li>

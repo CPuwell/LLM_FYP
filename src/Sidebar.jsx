@@ -4,6 +4,7 @@ import { getDisplayImageUrl } from './imageUtils.js';
 import { appendEvaluationLog } from './evaluationLog.js';
 import { getStoryMemory, selectFactsForScene } from './storyMemory.js';
 import { buildGeminiKeyHeader } from './userApiKey.js';
+import { resolveNodeUserPrompt } from './settingResolver.js';
 
 // accept new prop: onDeleteElement
 export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEdgeLabelChange, onEdgeDataChange, storyContext, worldBible, attributeKeyOptions, sidebarWidth, onSidebarWidthChange, addNodeFromSuggestion, onDeleteElement }) {
@@ -145,15 +146,12 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
   const handleTextGenerate = async () => {  
     setIsTextLoading(true);
     const startedAt = performance.now();
-    const memory = getStoryMemory();
-    const selectedFacts = selectFactsForScene(memory, { title: selectedNode.data.label, location: selectedNode?.data?.location || '', limit: 8 });
     const requestBody = { 
       title: selectedNode.data.label, 
       storyContext: storyContext,
       userPrompt: selectedNode.data.setting || '',
       worldBible: worldBible,
       location: selectedNode?.data?.location || '',
-      memory: { summary: memory.summary, facts: selectedFacts }
     };
     appendEvaluationLog({
       type: 'ai_generate_text_start',
@@ -164,8 +162,6 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
       worldBibleCharactersCount: Array.isArray(worldBible?.characters) ? worldBible.characters.length : 0,
       worldBibleLocationsCount: Array.isArray(worldBible?.locations) ? worldBible.locations.length : 0,
       location: selectedNode?.data?.location || '',
-      memorySummaryLength: (memory.summary || '').length,
-      memoryFactsCount: Array.isArray(selectedFacts) ? selectedFacts.length : 0,
     });
     try {
       const response = await fetch(`${apiBaseUrl}/api/generate`, {
@@ -230,6 +226,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
     setIsPlayerPreviewLoading(true);
     const memory = getStoryMemory();
     const selectedFacts = selectFactsForScene(memory, { title: selectedNode.data.label, location: selectedNode?.data?.location || '', limit: 8 });
+    const resolvedUserPrompt = resolveNodeUserPrompt(selectedNode?.data, attrs);
     appendEvaluationLog({
       type: 'ai_preview_player_text_start',
       nodeId: selectedNode.id,
@@ -246,7 +243,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
         body: JSON.stringify({
           title: selectedNode.data.label,
           storyContext,
-          userPrompt: selectedNode.data.setting || '',
+          userPrompt: resolvedUserPrompt,
           worldBible,
           location: selectedNode?.data?.location || '',
           memory: { summary: memory.summary, facts: selectedFacts },

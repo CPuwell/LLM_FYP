@@ -88,6 +88,11 @@
   width: min(520px, 90%);
 }
 
+.player-memory-loading {
+  margin: 10px auto 6px auto;
+  width: min(420px, 90%);
+}
+
 .player-runtime-loading-text {
   margin-top: 8px;
   font-size: 13px;
@@ -124,6 +129,33 @@
   display: flex;
   flex-direction: column;
   gap: 15px;
+}
+
+.player-debug {
+  margin: 14px auto 0 auto;
+  width: min(720px, 95%);
+  text-align: left;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  padding: 10px 12px;
+}
+
+.player-debug-title {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.86);
+  margin-bottom: 8px;
+}
+
+.player-debug-pre {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.9);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
 }
 
 .player-choice-button {

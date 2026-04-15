@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { clearEvaluationLogs, getEvaluationLogs, getEvaluationSessionId, resetEvaluationSession } from './evaluationLog.js';
 
 export default function EvaluationLogsModal({ isOpen, onClose }) {
@@ -37,11 +37,20 @@ export default function EvaluationLogsModal({ isOpen, onClose }) {
   };
 
   const handleNewSession = () => {
-    const ok = window.confirm('Start a new evaluation session id?');
+    const ok = window.confirm('Start a new evaluation session and clear logs?');
     if (!ok) return;
+    clearEvaluationLogs();
     resetEvaluationSession();
     handleRefresh();
   };
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const onUpdated = () => handleRefresh();
+    window.addEventListener('evaluationLogsUpdated', onUpdated);
+    handleRefresh();
+    return () => window.removeEventListener('evaluationLogsUpdated', onUpdated);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -74,4 +83,3 @@ export default function EvaluationLogsModal({ isOpen, onClose }) {
     </div>
   );
 }
-

@@ -235,8 +235,8 @@ app.post('/api/generate', async (req, res) => {
       err.statusCode = 500;
       throw err;
     }
-    const { title, storyContext, userPrompt, worldBible, location, memory } = validateGenerateRequest(req.body);
-    console.log(`[Text Gen] Request for: ${title}`);
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const { title, storyContext, userPrompt, worldBible, location } = validateGenerateRequest(body);
     const modelsToTry = ["gemini-2.5-flash-lite", "gemini-2.5-flash"];
     const out = await generateSceneText({
       genAI: reqGenAI,
@@ -246,7 +246,7 @@ app.post('/api/generate', async (req, res) => {
       userPrompt,
       worldBible,
       location,
-      memory,
+      memory: null,
     });
     return res.json(out);
   } catch (error) {
