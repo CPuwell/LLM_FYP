@@ -71,6 +71,15 @@ export default function GuideModal({ isOpen, onClose }) {
           </section>
 
           <section>
+            <h3>✨ AI Generation & Suggestions</h3>
+            <ul>
+              <li><strong>Generate Content</strong>: The AI can write a detailed scene description based on your Setting and World Bible.</li>
+              <li><strong>Action Suggestions</strong>: After generating a description, the AI suggests 3 possible next actions.</li>
+              <li><strong>Quick Build</strong>: Click the <strong>+</strong> button on an AI suggestion to automatically create a new scene and connect it with an edge.</li>
+            </ul>
+          </section>
+
+          <section>
             <h3>📐 Layout & Visuals</h3>
             <ul>
               <li><strong>Edge Bending</strong>: Click an edge to see a midpoint handle. Drag it to curve the line and keep your graph clean.</li>
@@ -81,17 +90,18 @@ export default function GuideModal({ isOpen, onClose }) {
           <section>
             <h3>📊 Analysis & Evaluation</h3>
             <ul>
-              <li><strong>Analyze</strong>: Check for dead ends, unreachable scenes, or story flow issues.</li>
-              <li><strong>Logs</strong>: View detailed AI prompts and responses to debug your story logic.</li>
-              <li><strong>Eval Pack</strong>: Export a complete package for feedback or academic evaluation.</li>
+              <li><strong>Analyze</strong>: Use the Analyze tool to check your story for <strong>reachability</strong>, <strong>dead ends</strong>, and invalid connections to ensure a smooth player experience.</li>
+              <li><strong>Logs</strong>: Access detailed logs of AI interactions, including prompts, responses, and performance metrics, to debug and refine your story logic.</li>
+              <li><strong>Eval Pack</strong>: Export a complete <strong>Evaluation Package</strong> containing your story, analysis results, and interaction logs. This is ideal for gathering feedback or providing academic evidence.</li>
             </ul>
           </section>
 
           <section>
-            <h3>💾 Saving & Sharing</h3>
+            <h3>💾 Backups & Data Management</h3>
             <ul>
-              <li><strong>Backups</strong>: Save multiple versions of your story in the browser.</li>
-              <li><strong>Export/Import</strong>: Download your story as a JSON file to share with others or move between devices.</li>
+              <li><strong>Backups</strong>: Save multiple versions of your work directly in your browser's local storage using the Backups manager.</li>
+              <li><strong>Export/Import</strong>: Download your entire story as a JSON file to share with others or move between different computers.</li>
+              <li><strong>New Story</strong>: Quickly reset the workspace to start a fresh project.</li>
             </ul>
           </section>
         </div>
