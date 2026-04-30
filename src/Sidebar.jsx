@@ -146,10 +146,19 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
   const handleTextGenerate = async () => {  
     setIsTextLoading(true);
     const startedAt = performance.now();
+    const rawSetting = selectedNode?.data?.setting || '';
+    let attrs = null;
+    try {
+      const parsed = JSON.parse(playerPreviewAttributesRaw || '{}');
+      attrs = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+    } catch {
+      attrs = null;
+    }
+    const resolvedUserPrompt = attrs ? resolveNodeUserPrompt(selectedNode?.data, attrs) : rawSetting;
     const requestBody = { 
       title: selectedNode.data.label, 
       storyContext: storyContext,
-      userPrompt: selectedNode.data.setting || '',
+      userPrompt: resolvedUserPrompt,
       worldBible: worldBible,
       location: selectedNode?.data?.location || '',
     };
@@ -158,7 +167,9 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
       nodeId: selectedNode.id,
       title: selectedNode.data.label,
       storyContextLength: (storyContext || '').length,
-      userPromptLength: (selectedNode.data.setting || '').length,
+      rawSettingLength: rawSetting.length,
+      resolvedUserPromptLength: resolvedUserPrompt.length,
+      usedSettingResolver: Boolean(attrs),
       worldBibleCharactersCount: Array.isArray(worldBible?.characters) ? worldBible.characters.length : 0,
       worldBibleLocationsCount: Array.isArray(worldBible?.locations) ? worldBible.locations.length : 0,
       location: selectedNode?.data?.location || '',

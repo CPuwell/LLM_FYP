@@ -18,16 +18,23 @@ if (preDotenvKey && postDotenvKey && preDotenvKey !== postDotenvKey) {
 }
 
 const app = express();
-const port = 3001;
+const port = process.env.PORT || 3001;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const generatedDir = path.join(__dirname, 'generated');
+const distDir = path.join(__dirname, 'dist');
 
 // 允许跨域请求，因为前端在 5173，后端在 3001
 app.use(cors());
 app.use(express.json());
 fs.mkdirSync(generatedDir, { recursive: true });
 app.use('/generated', express.static(generatedDir));
+
+// 在生产环境下提供前端静态文件
+if (fs.existsSync(distDir)) {
+  console.log('[Server] Serving static files from dist');
+  app.use(express.static(distDir));
+}
 
 const serverOrigin = process.env.SERVER_ORIGIN || `http://localhost:${port}`;
 const geminiImageModel = process.env.GEMINI_IMAGE_MODEL || 'imagen-4.0-fast-generate-001';
@@ -246,7 +253,7 @@ app.post('/api/generate', async (req, res) => {
       userPrompt,
       worldBible,
       location,
-      memory: null,
+      memory: null, // Make sure memory will not affect the static scene generation
     });
     return res.json(out);
   } catch (error) {
@@ -442,6 +449,19 @@ app.get('/api/proxy-image', async (req, res) => {
   }
 });
 
+// SPA 路由兜底：如果不是 API 请求且文件不存在，则返回 index.html
+app.get('*', (req, res) => {
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'API route not found' });
+  }
+  const indexPath = path.join(distDir, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(404).send('Not Found (and no frontend build found)');
+  }
+});
+
 app.listen(port, () => {
-  console.log(`Backend server running at http://localhost:${port}`);
+  console.log(`Backend server running at port ${port}`);
 });
