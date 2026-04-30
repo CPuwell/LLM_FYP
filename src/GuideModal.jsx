@@ -12,110 +12,88 @@ export default function GuideModal({ isOpen, onClose }) {
         </div>
 
         <div className="guide-body">
-          <h3>Graph Editor</h3>
-          <ul>
-            <li>Node = Location/Scene</li>
-            <li>Edge = Action/Choice between scenes</li>
-            <li>Click a node/edge to edit details in the right sidebar</li>
-            <li>Resize the sidebar by dragging its left edge</li>
-          </ul>
+          <section>
+            <h3>🔑 Getting Started (AI Setup)</h3>
+            <ul>
+              <li>To use AI features, click the <strong>Key icon</strong> at the top right to enter your <strong>Gemini API Key</strong>.</li>
+              <li>Your key is stored only in your browser's local storage and is sent directly to the AI service.</li>
+            </ul>
+          </section>
 
-          <h3>Story Context</h3>
-          <ul>
-            <li>High-level background for this story run</li>
-            <li>Keep it short: genre, mood, player role, core goal</li>
-            <li>Example: "Dark fantasy at dusk. You are a lost courier. Goal: reach the watchtower without being seen."</li>
-          </ul>
+          <section>
+            <h3>🎮 Editor vs Player Mode</h3>
+            <ul>
+              <li><strong>Editor Mode</strong>: Build your world by adding nodes (scenes) and edges (choices).</li>
+              <li><strong>Player Mode</strong>: Toggle the switch at the top to test your story as a player.</li>
+              <li>In Player Mode, you can see how attributes change and how the AI describes the scene based on your past actions.</li>
+            </ul>
+          </section>
 
-          <h3>World Bible</h3>
-          <ul>
-            <li>Structured, reusable canon: rules, tone, style, characters, locations</li>
-            <li>Prefer putting detailed facts here to avoid repetition in Story Context</li>
-            <li>Generation prioritizes World Bible constraints when relevant</li>
-            <li>Example (Rules): "No visible magic. Firearms are rare and unreliable."</li>
-            <li>Example (Character): "Captain Rhea: one-eyed scout leader; distrusts outsiders; speaks in short sentences."</li>
-            <li>Example (Location): "Watchtower of Lorn: crumbling stone tower; blue lantern at the top; wolves avoid it."</li>
-          </ul>
+          <section>
+            <h3>📝 Core Concepts</h3>
+            <ul>
+              <li><strong>Node</strong>: Represents a specific Location or Scene.</li>
+              <li><strong>Edge</strong>: Represents a Choice or Action leading from one scene to another.</li>
+              <li><strong>World Bible</strong>: Your story's "source of truth". Define global rules, character traits, and location details here. The AI will strictly follow these.</li>
+            </ul>
+          </section>
 
-          <h3>Setting (Scene Notes)</h3>
-          <ul>
-            <li>Setting is per-node notes: scene background, constraints, and state-based beats</li>
-            <li>In Player Mode, the app resolves conditions using current Attributes and sends only the resolved notes to the AI</li>
-            <li>Prefer writing present facts for this scene (avoid "will/might")</li>
-          </ul>
+          <section>
+            <h3>🧠 Long-term Memory</h3>
+            <ul>
+              <li>The system automatically tracks important facts and events as you play.</li>
+              <li>These "Facts" are summarized by the AI and injected into future scene generations, allowing the world to remember your past choices even if they weren't explicitly coded as attributes.</li>
+              <li>You can view the current memory state in Player Mode.</li>
+            </ul>
+          </section>
 
-          <h3>Setting Examples</h3>
-          <ul>
-            <li>Plain text (always included):</li>
-          </ul>
-          <pre className="guide-code">{`Records Corridor: narrow hallway, decaying cabinets, flickering lights.
-damp paper smell, low hum from emergency power.`}</pre>
-          <ul>
-            <li>IF/ELSE text rules (each rule resolves against Attributes):</li>
-          </ul>
-          <pre className="guide-code">{`- IF noise < 3: The corridor is quiet and safe.
- - ELSE: Something shifts behind you in the dark.
- - IF firstTimeEnter is true: A battered radio sits on the desk, a weak voice asking for help.`}</pre>
-          <ul>
-            <li>JSON blocks (recommended for precise control):</li>
-          </ul>
-          <pre className="guide-code">{`[
-  { "text": "Records Corridor: decaying cabinets, flickering lights, damp walls." },
-  { "when": { "eq": ["firstTimeEnter", true] }, "text": "A battered radio sits on the desk, a weak voice asking for help." },
-  { "when": { "lt": ["noise", 3] }, "text": "It is quiet for now." },
-  { "when": { "gte": ["noise", 3] }, "text": "A sharp sound echoes behind you." }
+          <section>
+            <h3>⚡ Attributes & Conditions</h3>
+            <ul>
+              <li><strong>On Enter Effects</strong>: Change attributes (e.g., <code>health -= 10</code>) when a player enters a scene.</li>
+              <li><strong>Edge Requirements</strong>: Hide or lock choices if conditions aren't met (e.g., <code>hasKey == true</code>).</li>
+              <li><strong>Edge Effects</strong>: Change attributes when a choice is selected.</li>
+              <li><strong>Single-use</strong>: Mark a choice as "Single-use" to prevent players from repeating it (useful for unique items or irreversible actions).</li>
+            </ul>
+          </section>
+
+          <section>
+            <h3>🖋️ Setting (Scene Notes)</h3>
+            <ul>
+              <li>Use the Setting field to provide specific details for a scene.</li>
+              <li>You can use <strong>Conditional Logic</strong> to change what the AI knows based on attributes:</li>
+            </ul>
+            <pre className="guide-code">{`[
+  { "text": "A dusty library." },
+  { "when": { "eq": ["hasTorch", true] }, "text": "Your torch illuminates ancient runes on the walls." },
+  { "when": { "lt": ["sanity", 5] }, "text": "The shadows seem to whisper your name." }
 ]`}</pre>
+          </section>
 
-          <h3>AI Generate</h3>
-          <ul>
-            <li>✨ Generates a scene description and three suggested actions</li>
-            <li>Use + on a suggestion to create a new node and connect it</li>
-          </ul>
+          <section>
+            <h3>📐 Layout & Visuals</h3>
+            <ul>
+              <li><strong>Edge Bending</strong>: Click an edge to see a midpoint handle. Drag it to curve the line and keep your graph clean.</li>
+              <li><strong>Images</strong>: Click "Generate Image" to create a visual for the current scene. External images are safely proxied to avoid loading issues.</li>
+            </ul>
+          </section>
 
-          <h3>Attributes / Conditions</h3>
-          <ul>
-            <li>Each scene can apply effects when entered (On Enter Effects)</li>
-            <li>Each choice can require conditions (Requirements) and apply effects (Effects)</li>
-            <li>Locked choices are disabled in Player Mode</li>
-            <li>Common examples: hasKey (bool), injured (bool), health (number)</li>
-          </ul>
+          <section>
+            <h3>📊 Analysis & Evaluation</h3>
+            <ul>
+              <li><strong>Analyze</strong>: Check for dead ends, unreachable scenes, or story flow issues.</li>
+              <li><strong>Logs</strong>: View detailed AI prompts and responses to debug your story logic.</li>
+              <li><strong>Eval Pack</strong>: Export a complete package for feedback or academic evaluation.</li>
+            </ul>
+          </section>
 
-          <h3>Choice Rules</h3>
-          <ul>
-            <li>Single-use choices can be selected only once in Player Mode</li>
-          </ul>
-
-          <h3>Edge Routing</h3>
-          <ul>
-            <li>Select an edge to reveal a draggable midpoint control</li>
-            <li>Drag it to adjust the edge path and improve readability</li>
-          </ul>
-
-          <h3>Images</h3>
-          <ul>
-            <li>🎨 Generate an image from the current scene description</li>
-            <li>External image URLs are displayed via backend proxy to reduce CORS/mixed-content issues</li>
-          </ul>
-
-          <h3>Analyze</h3>
-          <ul>
-            <li>Shows reachability, dead ends, invalid edges, average branching, cycles</li>
-            <li>Copy metrics as JSON for evaluation write-up</li>
-          </ul>
-
-          <h3>Eval Pack / Logs</h3>
-          <ul>
-            <li>🧾 Logs: records generation attempts, outcomes, durations, and which AI suggestions were applied</li>
-            <li>📦 Eval Pack: exports story + analysis + logs as one JSON for evaluation evidence</li>
-            <li>Use New Session to separate different participants or experiment runs</li>
-          </ul>
-
-          <h3>Backups / Import / Export</h3>
-          <ul>
-            <li>Backups: multiple save slots in the browser</li>
-            <li>Export: download a JSON file (includes World Bible)</li>
-            <li>Import: load JSON and auto-fix common issues</li>
-          </ul>
+          <section>
+            <h3>💾 Saving & Sharing</h3>
+            <ul>
+              <li><strong>Backups</strong>: Save multiple versions of your story in the browser.</li>
+              <li><strong>Export/Import</strong>: Download your story as a JSON file to share with others or move between devices.</li>
+            </ul>
+          </section>
         </div>
       </div>
     </div>
