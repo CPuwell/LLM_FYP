@@ -450,7 +450,7 @@ app.get('/api/proxy-image', async (req, res) => {
 });
 
 // SPA 路由兜底：如果不是 API 请求且文件不存在，则返回 index.html
-app.get('*', (req, res) => {
+app.get('(.*)', (req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ error: 'API route not found' });
   }
