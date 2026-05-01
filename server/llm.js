@@ -108,12 +108,14 @@ export const parseModelJson = (rawText) => {
 
 /**
  * 使用 Gemini 将中文或零散的描述优化为适合 Imagen 的英文关键词 Prompt
+ * 采用多模型回退策略以避免 404 错误
  */
-export const optimizeImagePrompt = async ({ genAI, modelName = 'gemini-1.5-flash', description, storyContext, worldBible }) => {
+export const optimizeImagePrompt = async ({ genAI, description, storyContext, worldBible }) => {
   if (!genAI) return description;
   
-  // 确保模型名称正确
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  const modelsToTry = ['gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-pro'];
+  let lastError = null;
+
   const prompt = `
     You are an expert prompt engineer for AI image generation (Imagen).
     Task: Convert the user's scene description into a high-quality, descriptive English image prompt.
@@ -130,14 +132,23 @@ export const optimizeImagePrompt = async ({ genAI, modelName = 'gemini-1.5-flash
     User Description: ${asString(description).slice(0, 1000)}
   `;
 
-  try {
-    const result = await model.generateContent(prompt);
-    const text = result.response.text().trim();
-    return text || description;
-  } catch (e) {
-    console.warn('[LLM] Image prompt optimization failed, falling back to raw description:', e.message);
-    return description;
+  for (const modelName of modelsToTry) {
+    try {
+      const model = genAI.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent(prompt);
+      const text = result.response.text().trim();
+      if (text) {
+        console.log(`[LLM] Image prompt optimized using ${modelName}`);
+        return text;
+      }
+    } catch (e) {
+      lastError = e;
+      console.warn(`[LLM] Optimization failed with ${modelName}, trying next...`);
+    }
   }
+
+  console.warn('[LLM] All image optimization models failed, falling back to raw description. Last error:', lastError?.message);
+  return description;
 };
 
 export const createGeminiClient = (apiKey) => {
