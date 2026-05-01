@@ -106,6 +106,39 @@ export const parseModelJson = (rawText) => {
     return msg.includes('429') || msg.includes('503') || msg.includes('Invalid AI JSON output') || msg.includes('MAX_TOKENS');
   };
 
+/**
+ * 使用 Gemini 将中文或零散的描述优化为适合 Imagen 的英文关键词 Prompt
+ */
+export const optimizeImagePrompt = async ({ genAI, modelName = 'gemini-1.5-flash', description, storyContext, worldBible }) => {
+  if (!genAI) return description;
+  
+  const model = genAI.getGenerativeModel({ model: modelName });
+  const prompt = `
+    You are an expert prompt engineer for AI image generation (Imagen).
+    Task: Convert the user's scene description into a high-quality, descriptive English image prompt.
+    
+    Rules:
+    1. If the input is in Chinese or another language, translate it to English.
+    2. Focus on visual keywords: lighting, atmosphere, specific objects, colors, and camera angles.
+    3. Keep it concise (under 100 words).
+    4. Do NOT use abstract words like "beautiful" or "amazing". Use concrete nouns and adjectives.
+    5. Output ONLY the optimized English prompt text. No preamble.
+    
+    Context: ${asString(storyContext).slice(0, 300)}
+    World Tone: ${asString(worldBible?.tone).slice(0, 100)}
+    User Description: ${asString(description).slice(0, 1000)}
+  `;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const text = result.response.text().trim();
+    return text || description;
+  } catch (e) {
+    console.warn('[LLM] Image prompt optimization failed, falling back to raw description:', e.message);
+    return description;
+  }
+};
+
 export const createGeminiClient = (apiKey) => {
   const key = asString(apiKey).trim();
   if (!key) return null;

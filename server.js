@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { createGeminiClient, generateSceneText } from './server/llm.js';
+import { createGeminiClient, generateSceneText, optimizeImagePrompt } from './server/llm.js';
 import { validateGenerateRequest } from './server/validate.js';
 import { updateLongTermMemory } from './server/memory.js';
 import { fetchProxiedImage } from './server/proxyImage.js';
@@ -329,19 +329,28 @@ app.post('/api/update-memory', async (req, res) => {
 app.post('/api/generate-image', async (req, res) => {
   try {
     const body = (req.body && typeof req.body === 'object') ? req.body : {};
-    const { description } = body;
+    const { description, storyContext, worldBible, title, location } = body;
     console.log(`[Image Gen] Request received for: ${String(description ?? '').slice(0, 30)}...`);
 
-    const rawDesc = (description ?? '').toString();
-    // 改用更宽松的策略：仅移除不可见的控制字符，保留所有可见字符（包括所有语言和标点）
-    const cleanStr = (s) => s.replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ').replace(/\s+/g, ' ').trim();
+    const { genAI: reqGenAI } = getGenAIForRequest(req);
+    
+    // 1. 使用 Gemini 将描述优化为英文关键词
+    const optimizedDesc = await optimizeImagePrompt({
+      genAI: reqGenAI,
+      description,
+      storyContext,
+      worldBible
+    });
 
-    const descClean = cleanStr(rawDesc).slice(0, 800);
-    const storyClean = cleanStr(body?.storyContext ?? '').slice(0, 420);
-    const titleClean = cleanStr(body?.title ?? '').slice(0, 120);
-    const locationClean = cleanStr(body?.location ?? '').slice(0, 120);
-    const toneClean = cleanStr(body?.tone ?? '').slice(0, 180);
-    const styleGuideClean = cleanStr(body?.styleGuide ?? '').slice(0, 280);
+    // 2. 清理和构建最终 Prompt
+    const cleanStr = (s) => (s || '').toString().replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ').replace(/\s+/g, ' ').trim();
+
+    const descClean = cleanStr(optimizedDesc).slice(0, 1000);
+    const storyClean = cleanStr(storyContext).slice(0, 420);
+    const titleClean = cleanStr(title).slice(0, 120);
+    const locationClean = cleanStr(location).slice(0, 120);
+    const toneClean = cleanStr(worldBible?.tone).slice(0, 180);
+    const styleGuideClean = cleanStr(worldBible?.styleGuide).slice(0, 280);
 
     const stylePreset = 'Cinematic, gritty survival horror. Nighttime. Low-key lighting. Desaturated color palette. 35mm film look, subtle film grain. Realistic. No text, no logos, no watermarks.';
 
@@ -352,13 +361,14 @@ app.post('/api/generate-image', async (req, res) => {
       styleGuideClean ? `STYLE GUIDE: ${styleGuideClean}` : '',
       titleClean ? `SCENE: ${titleClean}` : '',
       locationClean ? `LOCATION: ${locationClean}` : '',
-      descClean ? `VISUAL DESCRIPTION: ${descClean}` : '',
+      `VISUAL DESCRIPTION: ${descClean}`,
     ].filter(Boolean);
 
     const prompt = parts.join('\n').slice(0, 1500);
 
-    console.log('--- [Image Gen Prompt v2: Permissive] ---');
-    console.log(prompt);
+    console.log('--- [Image Gen Prompt v3: Optimized] ---');
+    console.log(`Original: ${String(description).slice(0, 100)}...`);
+    console.log(`Optimized: ${optimizedDesc}`);
     console.log('---------------------------');
 
     const tryGeminiImagen = async () => {
