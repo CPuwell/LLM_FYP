@@ -327,11 +327,12 @@ app.post('/api/update-memory', async (req, res) => {
 
 // 2. 图片生成 API
 app.post('/api/generate-image', async (req, res) => {
-  const body = (req.body && typeof req.body === 'object') ? req.body : {};
-  const { description } = body;
-  console.log(`[Image Gen] Request received for: ${String(description ?? '').slice(0, 30)}...`);
+  try {
+    const body = (req.body && typeof req.body === 'object') ? req.body : {};
+    const { description } = body;
+    console.log(`[Image Gen] Request received for: ${String(description ?? '').slice(0, 30)}...`);
 
-  const rawDesc = (description ?? '').toString();
+    const rawDesc = (description ?? '').toString();
     // 改用更宽松的策略：仅移除不可见的控制字符，保留所有可见字符（包括所有语言和标点）
     const cleanStr = (s) => s.replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ').replace(/\s+/g, ' ').trim();
 
