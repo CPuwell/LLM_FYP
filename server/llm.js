@@ -106,51 +106,6 @@ export const parseModelJson = (rawText) => {
     return msg.includes('429') || msg.includes('503') || msg.includes('Invalid AI JSON output') || msg.includes('MAX_TOKENS');
   };
 
-/**
- * 使用 Gemini 将中文或零散的描述优化为适合 Imagen 的英文关键词 Prompt
- * 采用多模型回退策略以避免 404 错误
- */
-export const optimizeImagePrompt = async ({ genAI, description, storyContext, worldBible }) => {
-  if (!genAI) return description;
-  
-  const modelsToTry = ['gemini-2.0-flash-lite', 'gemini-2.0-flash'];
-  let lastError = null;
-
-  const prompt = `
-    You are an expert prompt engineer for AI image generation (Imagen).
-    Task: Convert the user's scene description into a high-quality, descriptive English image prompt.
-    
-    Rules:
-    1. If the input is in Chinese or another language, translate it to English.
-    2. Focus on visual keywords: lighting, atmosphere, specific objects, colors, and camera angles.
-    3. Keep it concise (under 100 words).
-    4. Do NOT use abstract words like "beautiful" or "amazing". Use concrete nouns and adjectives.
-    5. Output ONLY the optimized English prompt text. No preamble.
-    
-    Context: ${asString(storyContext).slice(0, 300)}
-    World Tone: ${asString(worldBible?.tone).slice(0, 100)}
-    User Description: ${asString(description).slice(0, 1000)}
-  `;
-
-  for (const modelName of modelsToTry) {
-    try {
-      const model = genAI.getGenerativeModel({ model: modelName });
-      const result = await model.generateContent(prompt);
-      const text = result.response.text().trim();
-      if (text) {
-        console.log(`[LLM] Image prompt optimized using ${modelName}`);
-        return text;
-      }
-    } catch (e) {
-      lastError = e;
-      console.warn(`[LLM] Optimization failed with ${modelName}, trying next...`);
-    }
-  }
-
-  console.warn('[LLM] All image optimization models failed, falling back to raw description. Last error:', lastError?.message);
-  return description;
-};
-
 export const createGeminiClient = (apiKey) => {
   const key = asString(apiKey).trim();
   if (!key) return null;
