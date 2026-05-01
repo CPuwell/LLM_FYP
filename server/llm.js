@@ -112,7 +112,8 @@ export const parseModelJson = (rawText) => {
 export const optimizeImagePrompt = async ({ genAI, modelName = 'gemini-1.5-flash', description, storyContext, worldBible }) => {
   if (!genAI) return description;
   
-  const model = genAI.getGenerativeModel({ model: modelName });
+  // 确保模型名称正确
+  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
   const prompt = `
     You are an expert prompt engineer for AI image generation (Imagen).
     Task: Convert the user's scene description into a high-quality, descriptive English image prompt.
@@ -169,7 +170,7 @@ export const generateSceneText = async ({
 
   const modelList = Array.isArray(modelsToTry) && modelsToTry.length
     ? modelsToTry
-    : ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+    : ['gemini-1.5-flash', 'gemini-1.5-flash-8b'];
 
   const wbSnippet = buildWorldBibleSnippet(
     worldBible,
