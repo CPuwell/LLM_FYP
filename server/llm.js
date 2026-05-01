@@ -113,7 +113,7 @@ export const parseModelJson = (rawText) => {
 export const optimizeImagePrompt = async ({ genAI, description, storyContext, worldBible }) => {
   if (!genAI) return description;
   
-  const modelsToTry = ['gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-pro'];
+  const modelsToTry = ['gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-pro'];
   let lastError = null;
 
   const prompt = `
