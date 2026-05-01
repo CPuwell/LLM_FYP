@@ -333,17 +333,19 @@ app.post('/api/generate-image', async (req, res) => {
 
   try {
     const rawDesc = (description ?? '').toString();
-    const descClean = rawDesc.replace(/[^\w\s,.'"-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 520);
+    // 允许中文、日文、韩文等 Unicode 字符，以及基础标点
+    const cleanRegex = /[^\u4e00-\u9fa5\w\s,.'"\-，。！？（）【】]/g;
+    const descClean = rawDesc.replace(cleanRegex, ' ').replace(/\s+/g, ' ').trim().slice(0, 520);
     const storyContext = (body?.storyContext ?? '').toString();
-    const storyClean = storyContext.replace(/[^\w\s,.'"-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 420);
+    const storyClean = storyContext.replace(cleanRegex, ' ').replace(/\s+/g, ' ').trim().slice(0, 420);
     const title = (body?.title ?? '').toString();
-    const titleClean = title.replace(/[^\w\s,.'"-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+    const titleClean = title.replace(cleanRegex, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
     const location = (body?.location ?? '').toString();
-    const locationClean = location.replace(/[^\w\s,.'"-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+    const locationClean = location.replace(cleanRegex, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
     const tone = (body?.tone ?? '').toString();
-    const toneClean = tone.replace(/[^\w\s,.'"-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
+    const toneClean = tone.replace(cleanRegex, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
     const styleGuide = (body?.styleGuide ?? '').toString();
-    const styleGuideClean = styleGuide.replace(/[^\w\s,.'"-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 280);
+    const styleGuideClean = styleGuide.replace(cleanRegex, ' ').replace(/\s+/g, ' ').trim().slice(0, 280);
 
     const stylePreset = 'Cinematic, gritty survival horror. Nighttime. Low-key lighting. Desaturated color palette. 35mm film look, subtle film grain. Realistic. No text, no logos, no watermarks.';
     const parts = [
