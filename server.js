@@ -183,7 +183,7 @@ app.get('/api/debug-generate', async (req, res) => {
   const { genAI: reqGenAI } = getGenAIForRequest(req);
   const fingerprint = key ? crypto.createHash('sha256').update(key).digest('hex').slice(0, 10) : '';
   const envOverrode = Boolean(preDotenvKey && postDotenvKey && preDotenvKey !== postDotenvKey);
-  const modelName = typeof req.query.model === 'string' && req.query.model.trim() ? req.query.model.trim() : 'gemini-2.5-flash';
+  const modelName = typeof req.query.model === 'string' && req.query.model.trim() ? req.query.model.trim() : 'gemini-2.0-flash';
 
   if (!reqGenAI || !key) {
     return res.status(500).json({
@@ -244,7 +244,7 @@ app.post('/api/generate', async (req, res) => {
     }
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const { title, storyContext, userPrompt, worldBible, location } = validateGenerateRequest(body);
-    const modelsToTry = ["gemini-2.5-flash-lite", "gemini-2.5-flash"];
+    const modelsToTry = ["gemini-2.0-flash-lite", "gemini-2.0-flash"];
     const out = await generateSceneText({
       genAI: reqGenAI,
       modelsToTry,
@@ -277,7 +277,7 @@ app.post('/api/generate-player', async (req, res) => {
     const { title, storyContext, userPrompt, worldBible, location, memory } = validateGenerateRequest(body);
     const attributes = body?.attributes && typeof body.attributes === 'object' ? body.attributes : {};
     const playerState = `Attributes: ${JSON.stringify(attributes).slice(0, 2500)}`;
-    const modelsToTry = ["gemini-2.5-flash-lite", "gemini-2.5-flash"];
+    const modelsToTry = ["gemini-2.0-flash-lite", "gemini-2.0-flash"];
     const out = await generateSceneText({
       genAI: reqGenAI,
       modelsToTry,
@@ -313,7 +313,7 @@ app.post('/api/update-memory', async (req, res) => {
     if (!events.length) {
       return res.status(400).json({ error: 'Bad request', details: 'events is required' });
     }
-    const modelsToTry = ["gemini-2.5-flash-lite", "gemini-2.5-flash"];
+    const modelsToTry = ["gemini-2.0-flash-lite", "gemini-2.0-flash"];
     const out = await updateLongTermMemory({ genAI: reqGenAI, modelsToTry, memory, events });
     return res.json(out);
   } catch (error) {
