@@ -331,23 +331,19 @@ app.post('/api/generate-image', async (req, res) => {
   const { description } = body;
   console.log(`[Image Gen] Request received for: ${String(description ?? '').slice(0, 30)}...`);
 
-  try {
-    const rawDesc = (description ?? '').toString();
-    // 允许中文、日文、韩文等 Unicode 字符，以及基础标点
-    const cleanRegex = /[^\u4e00-\u9fa5\w\s,.'"\-，。！？（）【】]/g;
-    const descClean = rawDesc.replace(cleanRegex, ' ').replace(/\s+/g, ' ').trim().slice(0, 520);
-    const storyContext = (body?.storyContext ?? '').toString();
-    const storyClean = storyContext.replace(cleanRegex, ' ').replace(/\s+/g, ' ').trim().slice(0, 420);
-    const title = (body?.title ?? '').toString();
-    const titleClean = title.replace(cleanRegex, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
-    const location = (body?.location ?? '').toString();
-    const locationClean = location.replace(cleanRegex, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
-    const tone = (body?.tone ?? '').toString();
-    const toneClean = tone.replace(cleanRegex, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
-    const styleGuide = (body?.styleGuide ?? '').toString();
-    const styleGuideClean = styleGuide.replace(cleanRegex, ' ').replace(/\s+/g, ' ').trim().slice(0, 280);
+  const rawDesc = (description ?? '').toString();
+    // 改用更宽松的策略：仅移除不可见的控制字符，保留所有可见字符（包括所有语言和标点）
+    const cleanStr = (s) => s.replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ').replace(/\s+/g, ' ').trim();
+
+    const descClean = cleanStr(rawDesc).slice(0, 800);
+    const storyClean = cleanStr(body?.storyContext ?? '').slice(0, 420);
+    const titleClean = cleanStr(body?.title ?? '').slice(0, 120);
+    const locationClean = cleanStr(body?.location ?? '').slice(0, 120);
+    const toneClean = cleanStr(body?.tone ?? '').slice(0, 180);
+    const styleGuideClean = cleanStr(body?.styleGuide ?? '').slice(0, 280);
 
     const stylePreset = 'Cinematic, gritty survival horror. Nighttime. Low-key lighting. Desaturated color palette. 35mm film look, subtle film grain. Realistic. No text, no logos, no watermarks.';
+
     const parts = [
       `STYLE: ${stylePreset}`,
       storyClean ? `STORY CONTEXT: ${storyClean}` : '',
@@ -357,9 +353,10 @@ app.post('/api/generate-image', async (req, res) => {
       locationClean ? `LOCATION: ${locationClean}` : '',
       descClean ? `VISUAL DESCRIPTION: ${descClean}` : '',
     ].filter(Boolean);
-    const prompt = parts.join('\n').slice(0, 1200);
 
-    console.log('--- [Image Gen Prompt] ---');
+    const prompt = parts.join('\n').slice(0, 1500);
+
+    console.log('--- [Image Gen Prompt v2: Permissive] ---');
     console.log(prompt);
     console.log('---------------------------');
 
