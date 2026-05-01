@@ -357,6 +357,10 @@ app.post('/api/generate-image', async (req, res) => {
     ].filter(Boolean);
     const prompt = parts.join('\n').slice(0, 1200);
 
+    console.log('--- [Image Gen Prompt] ---');
+    console.log(prompt);
+    console.log('---------------------------');
+
     const tryGeminiImagen = async () => {
       const { key } = getGeminiKeyFromRequest(req);
       if (!key) return null;
@@ -420,7 +424,7 @@ app.post('/api/generate-image', async (req, res) => {
     let imageUrl = null;
     try {
       imageUrl = await tryGeminiImagen();
-      if (imageUrl) return res.json({ imageUrl });
+      if (imageUrl) return res.json({ imageUrl, prompt }); // 返回 prompt 以便前端调试
     } catch (e) {
       console.warn(`[Image Gen] Gemini Imagen failed: ${e.message}`);
     }

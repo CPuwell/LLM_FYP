@@ -328,6 +328,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
       }
       const data = await response.json();
       onDataChange({ imageUrl: data.imageUrl });
+      console.log('[Image Gen] Final Prompt used by server:', data.prompt); // 在浏览器控制台输出 Prompt
       appendEvaluationLog({
         type: 'ai_generate_image_success',
         nodeId: selectedNode.id,
