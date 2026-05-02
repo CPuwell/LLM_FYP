@@ -136,7 +136,7 @@ export const generateSceneText = async ({
 
   const modelList = Array.isArray(modelsToTry) && modelsToTry.length
     ? modelsToTry
-    : ['gemini-2.0-flash-lite', 'gemini-2.0-flash'];
+    : ['gemini-2.5-pro'];
 
   const wbSnippet = buildWorldBibleSnippet(
     worldBible,
