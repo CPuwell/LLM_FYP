@@ -1,44 +1,15 @@
-import React, { useCallback, useContext, useRef, useState } from 'react';
-import { BaseEdge, EdgeLabelRenderer, Position, useStore } from 'reactflow';
+import React from 'react';
+import { BaseEdge, EdgeLabelRenderer } from 'reactflow';
 import './ChoiceEdge.css';
-import { EdgeLabelDragContext } from './EdgeLabelDragContext.js';
-
-const cubicPoint = (p0, p1, p2, p3, t) => {
-  const u = 1 - t;
-  const tt = t * t;
-  const uu = u * u;
-  const uuu = uu * u;
-  const ttt = tt * t;
-  return {
-    x: uuu * p0.x + 3 * uu * t * p1.x + 3 * u * tt * p2.x + ttt * p3.x,
-    y: uuu * p0.y + 3 * uu * t * p1.y + 3 * u * tt * p2.y + ttt * p3.y,
-  };
-};
-
-const cubicDerivative = (p0, p1, p2, p3, t) => {
-  const u = 1 - t;
-  return {
-    x: 3 * u * u * (p1.x - p0.x) + 6 * u * t * (p2.x - p1.x) + 3 * t * t * (p3.x - p2.x),
-    y: 3 * u * u * (p1.y - p0.y) + 6 * u * t * (p2.y - p1.y) + 3 * t * t * (p3.y - p2.y),
-  };
-};
-
-const getTangent = (pos) => {
-  if (pos === Position.Top || pos === 'top') return { x: 0, y: -1 };
-  if (pos === Position.Bottom || pos === 'bottom') return { x: 0, y: 1 };
-  if (pos === Position.Left || pos === 'left') return { x: -1, y: 0 };
-  if (pos === Position.Right || pos === 'right') return { x: 1, y: 0 };
-  return { x: 0, y: 1 };
-};
-
-const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+import { clamp, cubicDerivative, cubicPoint, edgeSign, getTangent } from './edgeGeometry.js';
+import { useEdgeDragHandlers } from './useEdgeDragHandlers.js';
 
 const getOffsetCubicPath = ({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, offset, id, labelT, bendDx, bendDy }) => {
   const dx = targetX - sourceX;
   const dy = targetY - sourceY;
   const len = Math.hypot(dx, dy) || 1;
   const t = Number.isFinite(labelT) ? labelT : 0.5;
-  const sign = offset !== 0 ? Math.sign(offset) : ((`${id}`.charCodeAt(0) || 0) % 2 === 0 ? 1 : -1);
+  const sign = edgeSign(id, offset);
   const scaledOffset = sign * clamp(Math.abs(offset) * 0.22, 0, 70);
 
   const nx = -dy / len;
@@ -187,14 +158,6 @@ export default function ChoiceEdge({
   selected,
   data,
 }) {
-  const ctx = useContext(EdgeLabelDragContext);
-  const setEdges = ctx?.setEdges;
-  const zoom = useStore((s) => s.transform[2]);
-  const dragRef = useRef(null);
-  const [dragging, setDragging] = useState(false);
-  const bendDragRef = useRef(null);
-  const [bendDragging, setBendDragging] = useState(false);
-
   const offset = Number.isFinite(data?.offset) ? data.offset : 0;
   const labelT = Number.isFinite(data?.labelT) ? data.labelT : 0.5;
   const labelDx = Number.isFinite(data?.labelDx) ? data.labelDx : 0;
@@ -204,6 +167,13 @@ export default function ChoiceEdge({
   const isSelfLoop = Boolean(data?.isSelfLoop) || (sourceX === targetX && sourceY === targetY);
   const loopIndex = Number.isFinite(data?.loopIndex) ? data.loopIndex : 0;
   const loopCount = Number.isFinite(data?.loopCount) ? data.loopCount : 1;
+  const { dragging, bendDragging, labelHandlers, bendHandlers } = useEdgeDragHandlers({
+    id,
+    labelDx,
+    labelDy,
+    bendDx,
+    bendDy,
+  });
 
   const bendBase = (() => {
     if (isSelfLoop) {
@@ -217,7 +187,7 @@ export default function ChoiceEdge({
     const dx = targetX - sourceX;
     const dy = targetY - sourceY;
     const len = Math.hypot(dx, dy) || 1;
-    const sign = offset !== 0 ? Math.sign(offset) : ((`${id}`.charCodeAt(0) || 0) % 2 === 0 ? 1 : -1);
+    const sign = edgeSign(id, offset);
     const scaledOffset = sign * clamp(Math.abs(offset) * 0.22, 0, 70);
     const nx = -dy / len;
     const ny = dx / len;
@@ -234,86 +204,6 @@ export default function ChoiceEdge({
   const text = typeof label === 'string' ? label : '';
   const arrowColor = data?.isBackJump ? '#7c3aed' : '#555';
   const entryColor = data?.isBackJump ? '#7c3aed' : '#1f2937';
-
-  const onLabelPointerDown = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
-    dragRef.current = { x: e.clientX, y: e.clientY, dx: labelDx, dy: labelDy, z, pid: e.pointerId };
-    setDragging(true);
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch (err) {
-    }
-  }, [zoom, labelDx, labelDy]);
-
-  const onLabelPointerMove = useCallback((e) => {
-    const d = dragRef.current;
-    if (!d) return;
-    if (!setEdges) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const nextDx = d.dx + (e.clientX - d.x) / d.z;
-    const nextDy = d.dy + (e.clientY - d.y) / d.z;
-    setEdges((eds) => eds.map((edge) => (
-      edge.id === id
-        ? { ...edge, data: { ...(edge.data && typeof edge.data === 'object' ? edge.data : {}), labelDx: nextDx, labelDy: nextDy } }
-        : edge
-    )));
-  }, [id, setEdges]);
-
-  const onLabelPointerUp = useCallback((e) => {
-    const d = dragRef.current;
-    if (!d) return;
-    e.preventDefault();
-    e.stopPropagation();
-    dragRef.current = null;
-    setDragging(false);
-    try {
-      e.currentTarget.releasePointerCapture(d.pid);
-    } catch (err) {
-    }
-  }, []);
-
-  const onBendPointerDown = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
-    bendDragRef.current = { x: e.clientX, y: e.clientY, dx: bendDx, dy: bendDy, z, pid: e.pointerId };
-    setBendDragging(true);
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch (err) {
-    }
-  }, [zoom, bendDx, bendDy]);
-
-  const onBendPointerMove = useCallback((e) => {
-    const d = bendDragRef.current;
-    if (!d) return;
-    if (!setEdges) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const nextDx = d.dx + (e.clientX - d.x) / d.z;
-    const nextDy = d.dy + (e.clientY - d.y) / d.z;
-    setEdges((eds) => eds.map((edge) => (
-      edge.id === id
-        ? { ...edge, data: { ...(edge.data && typeof edge.data === 'object' ? edge.data : {}), bendDx: nextDx, bendDy: nextDy } }
-        : edge
-    )));
-  }, [id, setEdges]);
-
-  const onBendPointerUp = useCallback((e) => {
-    const d = bendDragRef.current;
-    if (!d) return;
-    e.preventDefault();
-    e.stopPropagation();
-    bendDragRef.current = null;
-    setBendDragging(false);
-    try {
-      e.currentTarget.releasePointerCapture(d.pid);
-    } catch (err) {
-    }
-  }, []);
 
   return (
     <>
@@ -347,10 +237,7 @@ export default function ChoiceEdge({
               transform: `translate(-50%, -50%) translate(${bendX}px,${bendY}px)`,
               boxShadow: bendDragging ? '0 2px 10px rgba(83, 91, 242, 0.45)' : undefined,
             }}
-            onPointerDown={onBendPointerDown}
-            onPointerMove={onBendPointerMove}
-            onPointerUp={onBendPointerUp}
-            onPointerCancel={onBendPointerUp}
+            {...bendHandlers}
             role="button"
             tabIndex={0}
           />
@@ -377,10 +264,7 @@ export default function ChoiceEdge({
               transform: `translate(-50%, -50%) translate(${labelX + labelDx}px,${labelY + labelDy}px)`,
               boxShadow: dragging ? '0 2px 6px rgba(0,0,0,0.25)' : undefined,
             }}
-            onPointerDown={onLabelPointerDown}
-            onPointerMove={onLabelPointerMove}
-            onPointerUp={onLabelPointerUp}
-            onPointerCancel={onLabelPointerUp}
+            {...labelHandlers}
           >
             {text}
           </div>

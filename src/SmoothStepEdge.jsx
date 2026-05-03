@@ -1,17 +1,8 @@
-import React, { useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, useStore } from 'reactflow';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath } from 'reactflow';
 import './ChoiceEdge.css';
-import { EdgeLabelDragContext } from './EdgeLabelDragContext.js';
-
-const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
-
-const getTangent = (pos) => {
-  if (pos === 'top') return { x: 0, y: -1 };
-  if (pos === 'bottom') return { x: 0, y: 1 };
-  if (pos === 'left') return { x: -1, y: 0 };
-  if (pos === 'right') return { x: 1, y: 0 };
-  return { x: 0, y: 1 };
-};
+import { clamp, edgeSign, getTangent } from './edgeGeometry.js';
+import { useEdgeDragHandlers } from './useEdgeDragHandlers.js';
 
 const getBendCubicPath = ({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, bendX, bendY }) => {
   const dx = targetX - sourceX;
@@ -50,14 +41,6 @@ export default function SmoothStepEdge({
   selected,
   data,
 }) {
-  const ctx = useContext(EdgeLabelDragContext);
-  const setEdges = ctx?.setEdges;
-  const zoom = useStore((s) => s.transform[2]);
-  const dragRef = useRef(null);
-  const [dragging, setDragging] = useState(false);
-  const bendDragRef = useRef(null);
-  const [bendDragging, setBendDragging] = useState(false);
-
   const offset = Number.isFinite(data?.offset) ? data.offset : 0;
   const labelT = Number.isFinite(data?.labelT) ? data.labelT : 0.5;
   const labelDx = Number.isFinite(data?.labelDx) ? data.labelDx : 0;
@@ -68,6 +51,13 @@ export default function SmoothStepEdge({
   const bendBaseY = (sourceY + targetY) / 2;
   const bendX = bendBaseX + bendDx;
   const bendY = bendBaseY + bendDy;
+  const { dragging, bendDragging, labelHandlers, bendHandlers } = useEdgeDragHandlers({
+    id,
+    labelDx,
+    labelDy,
+    bendDx,
+    bendDy,
+  });
 
   const hasBend = Math.abs(bendDx) > 0.01 || Math.abs(bendDy) > 0.01;
   const [smoothPath] = getSmoothStepPath({
@@ -88,7 +78,7 @@ export default function SmoothStepEdge({
   const [layout, setLayout] = useState(null);
 
   const labelColorClass = data?.isBackJump ? 'choice-edge-label choice-edge-label-backjump' : 'choice-edge-label';
-  const sign = offset !== 0 ? Math.sign(offset) : ((`${id}`.charCodeAt(0) || 0) % 2 === 0 ? 1 : -1);
+  const sign = edgeSign(id, offset);
   const labelDist = useMemo(() => {
     const mag = Math.min(80, Math.max(12, Math.abs(offset) * 0.35));
     return mag;
@@ -148,10 +138,10 @@ export default function SmoothStepEdge({
         endY: ep.y,
         endAngle: eAngle,
       });
-    } catch (e) {
+    } catch {
       setLayout(null);
     }
-  }, [edgePath, labelT, labelDist, sign]);
+  }, [edgePath, labelT, labelDist, sign, data?.isBackJump]);
 
   const text = typeof label === 'string' ? label : '';
   const arrowColor = data?.isBackJump ? '#7c3aed' : '#555';
@@ -159,86 +149,6 @@ export default function SmoothStepEdge({
   const bundleCount = Number.isFinite(data?.bundleCount) ? data.bundleCount : 1;
   const bundleIndex = Number.isFinite(data?.bundleIndex) ? data.bundleIndex : 0;
   const showRouteMarks = Boolean(selected) || bundleCount <= 1 || bundleIndex === 0;
-
-  const onLabelPointerDown = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
-    dragRef.current = { x: e.clientX, y: e.clientY, dx: labelDx, dy: labelDy, z, pid: e.pointerId };
-    setDragging(true);
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch (err) {
-    }
-  }, [zoom, labelDx, labelDy]);
-
-  const onLabelPointerMove = useCallback((e) => {
-    const d = dragRef.current;
-    if (!d) return;
-    if (!setEdges) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const nextDx = d.dx + (e.clientX - d.x) / d.z;
-    const nextDy = d.dy + (e.clientY - d.y) / d.z;
-    setEdges((eds) => eds.map((edge) => (
-      edge.id === id
-        ? { ...edge, data: { ...(edge.data && typeof edge.data === 'object' ? edge.data : {}), labelDx: nextDx, labelDy: nextDy } }
-        : edge
-    )));
-  }, [id, setEdges]);
-
-  const onLabelPointerUp = useCallback((e) => {
-    const d = dragRef.current;
-    if (!d) return;
-    e.preventDefault();
-    e.stopPropagation();
-    dragRef.current = null;
-    setDragging(false);
-    try {
-      e.currentTarget.releasePointerCapture(d.pid);
-    } catch (err) {
-    }
-  }, []);
-
-  const onBendPointerDown = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
-    bendDragRef.current = { x: e.clientX, y: e.clientY, dx: bendDx, dy: bendDy, z, pid: e.pointerId };
-    setBendDragging(true);
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch (err) {
-    }
-  }, [zoom, bendDx, bendDy]);
-
-  const onBendPointerMove = useCallback((e) => {
-    const d = bendDragRef.current;
-    if (!d) return;
-    if (!setEdges) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const nextDx = d.dx + (e.clientX - d.x) / d.z;
-    const nextDy = d.dy + (e.clientY - d.y) / d.z;
-    setEdges((eds) => eds.map((edge) => (
-      edge.id === id
-        ? { ...edge, data: { ...(edge.data && typeof edge.data === 'object' ? edge.data : {}), bendDx: nextDx, bendDy: nextDy } }
-        : edge
-    )));
-  }, [id, setEdges]);
-
-  const onBendPointerUp = useCallback((e) => {
-    const d = bendDragRef.current;
-    if (!d) return;
-    e.preventDefault();
-    e.stopPropagation();
-    bendDragRef.current = null;
-    setBendDragging(false);
-    try {
-      e.currentTarget.releasePointerCapture(d.pid);
-    } catch (err) {
-    }
-  }, []);
 
   return (
     <>
@@ -285,10 +195,7 @@ export default function SmoothStepEdge({
                   transform: `translate(-50%, -50%) translate(${layout.labelX + labelDx}px,${layout.labelY + labelDy}px)`,
                   boxShadow: dragging ? '0 2px 6px rgba(0,0,0,0.25)' : undefined,
                 }}
-                onPointerDown={onLabelPointerDown}
-                onPointerMove={onLabelPointerMove}
-                onPointerUp={onLabelPointerUp}
-                onPointerCancel={onLabelPointerUp}
+                {...labelHandlers}
               >
                 {text}
               </div>
@@ -299,10 +206,7 @@ export default function SmoothStepEdge({
                     transform: `translate(-50%, -50%) translate(${bendX}px,${bendY}px)`,
                     boxShadow: bendDragging ? '0 2px 10px rgba(83, 91, 242, 0.45)' : undefined,
                   }}
-                  onPointerDown={onBendPointerDown}
-                  onPointerMove={onBendPointerMove}
-                  onPointerUp={onBendPointerUp}
-                  onPointerCancel={onBendPointerUp}
+                  {...bendHandlers}
                   role="button"
                   tabIndex={0}
                 />
@@ -325,10 +229,7 @@ export default function SmoothStepEdge({
                     transform: `translate(-50%, -50%) translate(${bendX}px,${bendY}px)`,
                     boxShadow: bendDragging ? '0 2px 10px rgba(83, 91, 242, 0.45)' : undefined,
                   }}
-                  onPointerDown={onBendPointerDown}
-                  onPointerMove={onBendPointerMove}
-                  onPointerUp={onBendPointerUp}
-                  onPointerCancel={onBendPointerUp}
+                  {...bendHandlers}
                   role="button"
                   tabIndex={0}
                 />

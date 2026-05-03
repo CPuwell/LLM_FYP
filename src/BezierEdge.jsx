@@ -1,29 +1,15 @@
-import React, { useCallback, useContext, useRef, useState } from 'react';
-import { BaseEdge, EdgeLabelRenderer, getBezierPath, useStore } from 'reactflow';
+import React from 'react';
+import { BaseEdge, EdgeLabelRenderer, getBezierPath } from 'reactflow';
 import './ChoiceEdge.css';
-import { EdgeLabelDragContext } from './EdgeLabelDragContext.js';
-
-const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
-
-const cubicPoint = (p0, p1, p2, p3, t) => {
-  const u = 1 - t;
-  const tt = t * t;
-  const uu = u * u;
-  const uuu = uu * u;
-  const ttt = tt * t;
-  return {
-    x: uuu * p0.x + 3 * uu * t * p1.x + 3 * u * tt * p2.x + ttt * p3.x,
-    y: uuu * p0.y + 3 * uu * t * p1.y + 3 * u * tt * p2.y + ttt * p3.y,
-  };
-};
-
-const cubicDerivative = (p0, p1, p2, p3, t) => {
-  const u = 1 - t;
-  return {
-    x: 3 * u * u * (p1.x - p0.x) + 6 * u * t * (p2.x - p1.x) + 3 * t * t * (p3.x - p2.x),
-    y: 3 * u * u * (p1.y - p0.y) + 6 * u * t * (p2.y - p1.y) + 3 * t * t * (p3.y - p2.y),
-  };
-};
+import {
+  bendCubicPath,
+  clamp,
+  cubicDerivative,
+  cubicPoint,
+  edgeSign,
+  parseCubicPath,
+} from './edgeGeometry.js';
+import { useEdgeDragHandlers } from './useEdgeDragHandlers.js';
 
 export default function BezierEdge({
   id,
@@ -39,14 +25,6 @@ export default function BezierEdge({
   selected,
   data,
 }) {
-  const ctx = useContext(EdgeLabelDragContext);
-  const setEdges = ctx?.setEdges;
-  const zoom = useStore((s) => s.transform[2]);
-  const dragRef = useRef(null);
-  const [dragging, setDragging] = useState(false);
-  const bendDragRef = useRef(null);
-  const [bendDragging, setBendDragging] = useState(false);
-
   const offset = Number.isFinite(data?.offset) ? data.offset : 0;
   const labelT = Number.isFinite(data?.labelT) ? data.labelT : 0.5;
   const labelDx = Number.isFinite(data?.labelDx) ? data.labelDx : 0;
@@ -54,6 +32,14 @@ export default function BezierEdge({
   const curvature = Number.isFinite(data?.curvature) ? data.curvature : 0.25;
   const bendDx = Number.isFinite(data?.bendDx) ? data.bendDx : 0;
   const bendDy = Number.isFinite(data?.bendDy) ? data.bendDy : 0;
+
+  const { dragging, bendDragging, labelHandlers, bendHandlers } = useEdgeDragHandlers({
+    id,
+    labelDx,
+    labelDy,
+    bendDx,
+    bendDy,
+  });
 
   const [basePath] = getBezierPath({
     sourceX,
@@ -65,134 +51,32 @@ export default function BezierEdge({
     curvature,
   });
 
-  const parseBase = /^M\s*(-?\d+\.?\d*),\s*(-?\d+\.?\d*)\s*C\s*(-?\d+\.?\d*),\s*(-?\d+\.?\d*)\s*(-?\d+\.?\d*),\s*(-?\d+\.?\d*)\s*(-?\d+\.?\d*),\s*(-?\d+\.?\d*)\s*$/.exec(basePath);
-  const edgePath = (() => {
-    if (!parseBase) return basePath;
-    const nums = parseBase.slice(1).map((n) => Number(n));
-    const p0 = { x: nums[0], y: nums[1] };
-    const p1 = { x: nums[2] + bendDx, y: nums[3] + bendDy };
-    const p2 = { x: nums[4] + bendDx, y: nums[5] + bendDy };
-    const p3 = { x: nums[6], y: nums[7] };
-    return `M ${p0.x},${p0.y} C ${p1.x},${p1.y} ${p2.x},${p2.y} ${p3.x},${p3.y}`;
-  })();
-
+  const edgePath = bendCubicPath(basePath, bendDx, bendDy);
   const text = typeof label === 'string' ? label : '';
   const isBackJump = Boolean(data?.isBackJump);
+  const points = parseCubicPath(edgePath);
 
-  const parse = /^M\s*(-?\d+\.?\d*),\s*(-?\d+\.?\d*)\s*C\s*(-?\d+\.?\d*),\s*(-?\d+\.?\d*)\s*(-?\d+\.?\d*),\s*(-?\d+\.?\d*)\s*(-?\d+\.?\d*),\s*(-?\d+\.?\d*)\s*$/.exec(edgePath);
-  if (!parse) {
+  if (!points) {
     return <BaseEdge id={id} path={edgePath} style={style} markerEnd={markerEnd} />;
   }
 
-  const nums = parse.slice(1).map((n) => Number(n));
-  const p0 = { x: nums[0], y: nums[1] };
-  const p1 = { x: nums[2], y: nums[3] };
-  const p2 = { x: nums[4], y: nums[5] };
-  const p3 = { x: nums[6], y: nums[7] };
+  const [p0, p1, p2, p3] = points;
   const bendPt = cubicPoint(p0, p1, p2, p3, 0.5);
-
-  const baseT = isBackJump ? 0.33 : labelT;
-  const t = clamp(baseT, 0.2, 0.8);
+  const t = clamp(isBackJump ? 0.33 : labelT, 0.2, 0.8);
   const pt = cubicPoint(p0, p1, p2, p3, t);
   const dt = cubicDerivative(p0, p1, p2, p3, t);
   const dLen = Math.hypot(dt.x, dt.y) || 1;
   const nx = -dt.y / dLen;
   const ny = dt.x / dLen;
-
-  const sign = offset !== 0 ? Math.sign(offset) : ((`${id}`.charCodeAt(0) || 0) % 2 === 0 ? 1 : -1);
   const labelDist = Math.min(70, Math.max(12, Math.abs(offset) * 0.25));
-  const labelX = pt.x + nx * labelDist * sign;
-  const labelY = pt.y + ny * labelDist * sign;
-
-  const startT = 0.12;
-  const endT = 0.88;
-  const pStart = cubicPoint(p0, p1, p2, p3, startT);
-  const pEnd = cubicPoint(p0, p1, p2, p3, endT);
-  const dEnd = cubicDerivative(p0, p1, p2, p3, endT);
+  const labelX = pt.x + nx * labelDist * edgeSign(id, offset);
+  const labelY = pt.y + ny * labelDist * edgeSign(id, offset);
+  const pStart = cubicPoint(p0, p1, p2, p3, 0.12);
+  const pEnd = cubicPoint(p0, p1, p2, p3, 0.88);
+  const dEnd = cubicDerivative(p0, p1, p2, p3, 0.88);
   const endAngle = Math.atan2(dEnd.y, dEnd.x) * (180 / Math.PI);
-
   const arrowColor = isBackJump ? '#7c3aed' : '#555';
   const entryColor = isBackJump ? '#7c3aed' : '#1f2937';
-
-  const onLabelPointerDown = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
-    dragRef.current = { x: e.clientX, y: e.clientY, dx: labelDx, dy: labelDy, z, pid: e.pointerId };
-    setDragging(true);
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch (err) {
-    }
-  }, [zoom, labelDx, labelDy]);
-
-  const onLabelPointerMove = useCallback((e) => {
-    const d = dragRef.current;
-    if (!d) return;
-    if (!setEdges) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const nextDx = d.dx + (e.clientX - d.x) / d.z;
-    const nextDy = d.dy + (e.clientY - d.y) / d.z;
-    setEdges((eds) => eds.map((edge) => (
-      edge.id === id
-        ? { ...edge, data: { ...(edge.data && typeof edge.data === 'object' ? edge.data : {}), labelDx: nextDx, labelDy: nextDy } }
-        : edge
-    )));
-  }, [id, setEdges]);
-
-  const onLabelPointerUp = useCallback((e) => {
-    const d = dragRef.current;
-    if (!d) return;
-    e.preventDefault();
-    e.stopPropagation();
-    dragRef.current = null;
-    setDragging(false);
-    try {
-      e.currentTarget.releasePointerCapture(d.pid);
-    } catch (err) {
-    }
-  }, []);
-
-  const onBendPointerDown = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
-    bendDragRef.current = { x: e.clientX, y: e.clientY, dx: bendDx, dy: bendDy, z, pid: e.pointerId };
-    setBendDragging(true);
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch (err) {
-    }
-  }, [zoom, bendDx, bendDy]);
-
-  const onBendPointerMove = useCallback((e) => {
-    const d = bendDragRef.current;
-    if (!d) return;
-    if (!setEdges) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const nextDx = d.dx + (e.clientX - d.x) / d.z;
-    const nextDy = d.dy + (e.clientY - d.y) / d.z;
-    setEdges((eds) => eds.map((edge) => (
-      edge.id === id
-        ? { ...edge, data: { ...(edge.data && typeof edge.data === 'object' ? edge.data : {}), bendDx: nextDx, bendDy: nextDy } }
-        : edge
-    )));
-  }, [id, setEdges]);
-
-  const onBendPointerUp = useCallback((e) => {
-    const d = bendDragRef.current;
-    if (!d) return;
-    e.preventDefault();
-    e.stopPropagation();
-    bendDragRef.current = null;
-    setBendDragging(false);
-    try {
-      e.currentTarget.releasePointerCapture(d.pid);
-    } catch (err) {
-    }
-  }, []);
 
   return (
     <>
@@ -228,10 +112,7 @@ export default function BezierEdge({
               transform: `translate(-50%, -50%) translate(${labelX + labelDx}px,${labelY + labelDy}px)`,
               boxShadow: dragging ? '0 2px 6px rgba(0,0,0,0.25)' : undefined,
             }}
-            onPointerDown={onLabelPointerDown}
-            onPointerMove={onLabelPointerMove}
-            onPointerUp={onLabelPointerUp}
-            onPointerCancel={onLabelPointerUp}
+            {...labelHandlers}
           >
             {text}
           </div>
@@ -251,10 +132,7 @@ export default function BezierEdge({
               transform: `translate(-50%, -50%) translate(${bendPt.x}px,${bendPt.y}px)`,
               boxShadow: bendDragging ? '0 2px 10px rgba(83, 91, 242, 0.45)' : undefined,
             }}
-            onPointerDown={onBendPointerDown}
-            onPointerMove={onBendPointerMove}
-            onPointerUp={onBendPointerUp}
-            onPointerCancel={onBendPointerUp}
+            {...bendHandlers}
             role="button"
             tabIndex={0}
           />
