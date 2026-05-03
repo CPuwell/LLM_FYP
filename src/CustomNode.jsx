@@ -5,7 +5,7 @@ import './CustomNode.css'; // We'll create this file next
 import { getDisplayImageUrl } from './imageUtils.js';
 
 // `memo` is a performance optimization for React components
-export default memo(({ data }) => {
+function CustomNode({ data }) {
   return (
     <div className="custom-node">
       <Handle id="tT" type="target" position={Position.Top} className="custom-handle custom-handle-target" style={{ top: -6 }} />
@@ -26,4 +26,6 @@ export default memo(({ data }) => {
 
     </div>
   );
-});
+}
+
+export default memo(CustomNode);

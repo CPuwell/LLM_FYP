@@ -26,8 +26,11 @@ const testParseModelJson = () => {
 const testValidateGenerateRequest = () => {
   assert.throws(
     () => validateGenerateRequest({ title: 't' }),
-    /storyContext is required/i,
+    /storyContext or userPrompt or worldBible is required/i,
   );
+
+  assert.doesNotThrow(() => validateGenerateRequest({ title: 't', userPrompt: 'u' }));
+  assert.doesNotThrow(() => validateGenerateRequest({ title: 't', worldBible: { premise: 'p' } }));
 
   const out = validateGenerateRequest({
     title: 't',

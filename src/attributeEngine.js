@@ -1,4 +1,4 @@
-const isPlainObject = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 const getByPath = (obj, path) => {
   if (!obj || !path) return undefined;
@@ -153,7 +153,7 @@ export const applyEffects = (attributes, effects) => {
       continue;
     }
     if (op === 'toggle') {
-      next[e.key] = !Boolean(next[e.key]);
+      next[e.key] = !next[e.key];
       continue;
     }
     if (op === 'inc' || op === 'dec') {

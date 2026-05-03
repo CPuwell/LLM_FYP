@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { clearEvaluationLogs, getEvaluationLogs, getEvaluationSessionId, resetEvaluationSession } from './evaluationLog.js';
 
 export default function EvaluationLogsModal({ isOpen, onClose }) {
-  const [refreshKey, setRefreshKey] = useState(0);
-  const logs = useMemo(() => getEvaluationLogs(), [refreshKey]);
-  const sessionId = useMemo(() => getEvaluationSessionId(), [refreshKey]);
+  const [, setRefreshKey] = useState(0);
+  const logs = getEvaluationLogs();
+  const sessionId = getEvaluationSessionId();
 
   const handleRefresh = () => setRefreshKey((x) => x + 1);
 

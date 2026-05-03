@@ -6,7 +6,7 @@ export const getUserGeminiApiKey = () => {
     if (typeof v !== 'string') return '';
     const t = v.trim();
     return t ? t : '';
-  } catch (e) {
+  } catch {
     return '';
   }
 };
@@ -19,7 +19,7 @@ export const setUserGeminiApiKey = (key) => {
       return;
     }
     localStorage.setItem(STORAGE_KEY, v);
-  } catch (e) {
+  } catch {
     return;
   }
 };
@@ -27,7 +27,7 @@ export const setUserGeminiApiKey = (key) => {
 export const clearUserGeminiApiKey = () => {
   try {
     localStorage.removeItem(STORAGE_KEY);
-  } catch (e) {
+  } catch {
     return;
   }
 };

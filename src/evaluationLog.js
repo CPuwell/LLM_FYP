@@ -5,6 +5,7 @@ const notifyUpdate = () => {
   try {
     window.dispatchEvent(new Event('evaluationLogsUpdated'));
   } catch {
+    // Event dispatch is best-effort in non-browser test contexts.
   }
 };
 

@@ -178,8 +178,8 @@ const withEdgeLayout = (eds, nodes) => {
   }
   for (const e of computed) {
     if (e?.data?.bundleKey) {
-      const { bundleKey, ...rest } = e.data;
-      e.data = rest;
+      e.data = { ...e.data };
+      delete e.data.bundleKey;
     }
   }
   return computed;
@@ -446,7 +446,8 @@ function App() {
         localStorage.setItem('storyEdges', JSON.stringify(edges));
         localStorage.setItem('storyContext', storyContext);
         localStorage.setItem('worldBible', JSON.stringify(worldBible));
-      } catch (e) {
+      } catch {
+        // Autosave is best-effort; private browsing can block localStorage.
       }
     }, 600);
 

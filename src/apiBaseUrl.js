@@ -7,6 +7,7 @@ export const getApiBaseUrl = () => {
     const host = window.location.hostname;
     if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:3001';
   } catch {
+    // Browser location access can fail in unusual embedded contexts.
   }
   return '';
 };

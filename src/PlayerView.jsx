@@ -1,5 +1,5 @@
 // src/PlayerView.jsx
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import './PlayerView.css'; 
 import { getDisplayImageUrl } from './imageUtils.js';
 import { applyEffects, evaluateConditions } from './attributeEngine.js';
@@ -26,7 +26,6 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
   const enterGateRef = useRef({ nodeId: '', enterTs: '', deadlineMs: 0 });
   const enterGateTimeoutRef = useRef(null);
   const [enterGateTick, setEnterGateTick] = useState(0);
-  const [memoryEpoch, setMemoryEpoch] = useState(0);
   const [isMemoryUpdating, setIsMemoryUpdating] = useState(false);
   const [appliedNodeEffectIds, setAppliedNodeEffectIds] = useState(() => new Set());
   const [choiceFeedback, setChoiceFeedback] = useState(null);
@@ -50,6 +49,11 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
     () => (Array.isArray(nodes) ? nodes.map((n) => String(n?.id || '')).join('|') : ''),
     [nodes],
   );
+  const initialResolvedNodeId = useMemo(() => {
+    if (!nodes || nodes.length === 0) return '';
+    const exists = nodes.some((n) => n.id === initialNodeId);
+    return exists ? initialNodeId : nodes[0].id;
+  }, [initialNodeId, nodes]);
 
   useEffect(() => {
     attributesRef.current = attributes;
@@ -84,15 +88,13 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
   }, []);
 
   useEffect(() => {
-    if (!nodes || nodes.length === 0) return;
+    if (!initialResolvedNodeId) return;
     clearEvaluationLogs();
     resetEvaluationSession();
-    const exists = nodes.some((n) => n.id === initialNodeId);
-    setCurrentNodeId(exists ? initialNodeId : nodes[0].id);
+    setCurrentNodeId(initialResolvedNodeId);
     setHistory([]);
     setUsedChoiceIds(new Set());
     setAttributes({});
-    setMemoryEpoch(0);
     setIsMemoryUpdating(false);
     lastEnteredNodeIdRef.current = null;
     enterGateRef.current = { nodeId: '', enterTs: '', deadlineMs: 0 };
@@ -127,7 +129,7 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
       imageGenAbortRef.current.abort();
       imageGenAbortRef.current = null;
     }
-  }, [initialNodeId, nodesSig]);
+  }, [initialResolvedNodeId, nodesSig]);
 
   // Update currentNode and currentChoices whenever currentNodeId changes
   useEffect(() => {
@@ -163,7 +165,7 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
     });
   }, [currentNodeId, nodes]);
 
-  const scheduleMemoryUpdate = () => {
+  const scheduleMemoryUpdate = useCallback(() => {
     if (memoryUpdateInFlightRef.current) {
       memoryUpdatePendingRef.current = true;
       return;
@@ -239,7 +241,6 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
           lastProcessedLogTs: lastLogTs || '',
           runId: memory.runId,
         });
-        setMemoryEpoch((x) => x + 1);
         if (enterGateRef.current?.nodeId === currentNodeId) {
           setEnterGateTick((x) => x + 1);
         }
@@ -264,7 +265,7 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
         }
       }
     }, 900);
-  };
+  }, [apiBaseUrl, currentNodeId]);
 
   useEffect(() => {
     const node = nodes?.find((n) => n.id === currentNodeId);
@@ -288,7 +289,7 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
       }
     }, 1900);
     scheduleMemoryUpdate();
-  }, [currentNodeId, nodesSig]);
+  }, [currentNodeId, nodes, nodesSig, scheduleMemoryUpdate]);
 
   useEffect(() => {
     const node = nodes?.find((n) => n.id === currentNodeId);
@@ -404,7 +405,7 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
         });
     }
     }
-  }, [currentNodeId, storyContext, worldBible, attributes, nodesSig, enterGateTick, appliedNodeEffectIds]);
+  }, [currentNodeId, storyContext, worldBible, attributes, nodes, nodesSig, enterGateTick, appliedNodeEffectIds, apiBaseUrl]);
 
   useEffect(() => {
     const node = nodes?.find((n) => n.id === currentNodeId);
@@ -422,7 +423,11 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
     }
 
     const baseDesc = (runtimeDescription || node?.data?.description || '').toString().trim();
-    if (!baseDesc) return;
+    if (!baseDesc) {
+      setRuntimeImageUrl('');
+      setIsRuntimeImageGenerating(false);
+      return;
+    }
     const dynamicDescriptionEnabled = Boolean(node?.data?.dynamicDescriptionEnabled);
     if (isRuntimeGenerating && dynamicDescriptionEnabled) return;
 
@@ -469,6 +474,7 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
             try {
               errorText = await r.text();
             } catch {
+              errorText = '';
             }
           }
           const msg = errorData.details || errorData.error || (errorText ? errorText.slice(0, 260) : '') || `HTTP ${r.status}`;
@@ -506,7 +512,16 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
         if (imageGenAbortRef.current === controller) imageGenAbortRef.current = null;
         setIsRuntimeImageGenerating(false);
       });
-  }, [currentNodeId, runtimeDescription, isRuntimeGenerating, nodes]);
+  }, [
+    currentNodeId,
+    runtimeDescription,
+    isRuntimeGenerating,
+    nodes,
+    apiBaseUrl,
+    storyContext,
+    worldBible?.tone,
+    worldBible?.styleGuide,
+  ]);
 
   const getChoiceDisabledReason = (edge) => {
     if (!edge) return null;
@@ -638,6 +653,7 @@ export default function PlayerView({ nodes, edges, storyContext, worldBible, onE
       try {
         localStorage.setItem('playerShowAttributes', next ? '1' : '0');
       } catch {
+        // Persisting this preference is best-effort.
       }
       return next;
     });

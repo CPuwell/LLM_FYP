@@ -19,6 +19,7 @@ if (preDotenvKey && postDotenvKey && preDotenvKey !== postDotenvKey) {
 
 const app = express();
 const port = process.env.PORT || 3001;
+const aiDebug = process.env.AI_DEBUG === '1';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const generatedDir = path.join(__dirname, 'generated');
@@ -36,7 +37,6 @@ if (fs.existsSync(distDir)) {
   app.use(express.static(distDir));
 }
 
-const serverOrigin = process.env.SERVER_ORIGIN || `http://localhost:${port}`;
 const geminiImageModel = process.env.GEMINI_IMAGE_MODEL || 'imagen-4.0-fast-generate-001';
 
 const getExtFromContentType = (contentType) => {
@@ -87,9 +87,12 @@ const apiKey = process.env.GEMINI_API_KEY;
 if (!apiKey) {
   console.error("❌ Error: GEMINI_API_KEY is missing in .env file");
 } else {
-  const fingerprint = crypto.createHash('sha256').update(apiKey).digest('hex').slice(0, 10);
-  const suffix = apiKey.slice(-6);
-  console.log(`[Gemini] GEMINI_API_KEY loaded (sha256[0..10]=${fingerprint}, suffix=...${suffix})`);
+  if (aiDebug) {
+    const fingerprint = crypto.createHash('sha256').update(apiKey).digest('hex').slice(0, 10);
+    console.log(`[Gemini] GEMINI_API_KEY loaded (sha256[0..10]=${fingerprint})`);
+  } else {
+    console.log('[Gemini] GEMINI_API_KEY loaded');
+  }
 }
 
 const genAI = createGeminiClient(apiKey);
@@ -330,11 +333,15 @@ app.post('/api/generate-image', async (req, res) => {
   try {
     const body = (req.body && typeof req.body === 'object') ? req.body : {};
     const { description } = body;
-    console.log(`[Image Gen] Request received for: ${String(description ?? '').slice(0, 30)}...`);
+    const descriptionLength = String(description ?? '').length;
+    console.log(`[Image Gen] Request received (descriptionLength=${descriptionLength})`);
 
     const rawDesc = (description ?? '').toString();
     // 改用更宽松的策略：仅移除不可见的控制字符，保留所有可见字符（包括所有语言和标点）
-    const cleanStr = (s) => s.replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ').replace(/\s+/g, ' ').trim();
+    const cleanStr = (s) => {
+      // eslint-disable-next-line no-control-regex
+      return s.replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ').replace(/\s+/g, ' ').trim();
+    };
 
     const descClean = cleanStr(rawDesc).slice(0, 800);
     const storyClean = cleanStr(body?.storyContext ?? '').slice(0, 420);
@@ -357,9 +364,11 @@ app.post('/api/generate-image', async (req, res) => {
 
     const prompt = parts.join('\n').slice(0, 1500);
 
-    console.log('--- [Image Gen Prompt] ---');
-    console.log(prompt);
-    console.log('---------------------------');
+    if (aiDebug) {
+      console.log('--- [Image Gen Prompt] ---');
+      console.log(prompt);
+      console.log('---------------------------');
+    }
 
     const tryGeminiImagen = async () => {
       const { key } = getGeminiKeyFromRequest(req);

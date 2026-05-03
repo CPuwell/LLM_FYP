@@ -16,6 +16,7 @@ export const getDisplayImageUrl = (url) => {
       const u = new URL(trimmed);
       if (u.pathname.startsWith('/generated/')) return u.toString();
     } catch {
+      // Fall through and proxy invalid absolute-looking URLs.
     }
     if (apiBaseUrl) return `${apiBaseUrl}/api/proxy-image?url=${encodeURIComponent(trimmed)}`;
     return `/api/proxy-image?url=${encodeURIComponent(trimmed)}`;

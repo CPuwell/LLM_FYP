@@ -21,7 +21,7 @@ export default function StoryAnalysisModal({ isOpen, onClose, nodes, edges, star
     try {
       await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
       alert('Analysis copied to clipboard.');
-    } catch (e) {
+    } catch {
       alert('Copy failed.');
     }
   };

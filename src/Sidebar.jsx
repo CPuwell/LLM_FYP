@@ -35,7 +35,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
       setNodeOnEnterEffects([]);
     }
     setPlayerPreviewText('');
-  }, [selectedNode?.id]);
+  }, [selectedNode]);
 
   useEffect(() => {
     if (selectedEdge) {
@@ -69,7 +69,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
       setEdgeRequirementsMode('all');
       setEdgeEffects([]);
     }
-  }, [selectedEdge?.id]);
+  }, [selectedEdge]);
 
   const handleNodeDataChange = (event) => {
     onDataChange({ [event.target.name]: event.target.value });
@@ -353,6 +353,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
+      // Pointer capture is optional for resize drag support.
     }
   };
 
@@ -374,6 +375,7 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
     try {
       e.currentTarget.releasePointerCapture(d.pid);
     } catch {
+      // Matching the guarded pointer capture call above.
     }
     if (typeof onSidebarWidthChange === 'function') {
       const currentW = Number.isFinite(sidebarWidth) ? sidebarWidth : 420;
@@ -455,7 +457,11 @@ export default function Sidebar({ selectedNode, onDataChange, selectedEdge, onEd
           onChange={(e) => {
             const v = e.target.value;
             setPlayerPreviewAttributesRaw(v);
-            try { localStorage.setItem('playerPreviewAttributes', v); } catch { }
+            try {
+              localStorage.setItem('playerPreviewAttributes', v);
+            } catch {
+              // Persisting preview attributes is best-effort.
+            }
           }}
           placeholder='{"hp":10,"hasKey":true}'
         />
