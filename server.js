@@ -118,6 +118,7 @@ const getGenAIForRequest = (req) => {
   return { genAI: createGeminiClient(key), keySource: source };
 };
 
+if (aiDebug) {
 app.get('/api/debug-gemini', async (req, res) => {
   const { key, source } = getGeminiKeyFromRequest(req);
   const fingerprint = key ? crypto.createHash('sha256').update(key).digest('hex').slice(0, 10) : '';
@@ -235,6 +236,7 @@ app.get('/api/debug-generate', async (req, res) => {
     });
   }
 });
+}
 
 // 1. 文本生成 API
 app.post('/api/generate', async (req, res) => {
