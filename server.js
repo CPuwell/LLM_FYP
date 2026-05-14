@@ -25,13 +25,13 @@ const __dirname = path.dirname(__filename);
 const generatedDir = path.join(__dirname, 'generated');
 const distDir = path.join(__dirname, 'dist');
 
-// 允许跨域请求，因为前端在 5173，后端在 3001
+// Allow cross-origin requests because the frontend runs on 5173 and the backend on 3001.
 app.use(cors());
 app.use(express.json());
 fs.mkdirSync(generatedDir, { recursive: true });
 app.use('/generated', express.static(generatedDir));
 
-// 在生产环境下提供前端静态文件
+// Serve frontend static files in production.
 if (fs.existsSync(distDir)) {
   console.log('[Server] Serving static files from dist');
   app.use(express.static(distDir));
@@ -82,10 +82,10 @@ const saveBufferToGenerated = (buffer, contentType) => {
   return `/generated/${name}`;
 };
 
-// 配置 Google Gemini API
+// Configure the Google Gemini API.
 const apiKey = process.env.GEMINI_API_KEY;
 if (!apiKey) {
-  console.error("❌ Error: GEMINI_API_KEY is missing in .env file");
+  console.error("Error: GEMINI_API_KEY is missing in .env file");
 } else {
   if (aiDebug) {
     const fingerprint = crypto.createHash('sha256').update(apiKey).digest('hex').slice(0, 10);
@@ -238,7 +238,7 @@ app.get('/api/debug-generate', async (req, res) => {
 });
 }
 
-// 1. 文本生成 API
+// 1. Text generation API
 app.post('/api/generate', async (req, res) => {
   try {
     const { genAI: reqGenAI } = getGenAIForRequest(req);
@@ -330,7 +330,7 @@ app.post('/api/update-memory', async (req, res) => {
   }
 });
 
-// 2. 图片生成 API
+// 2. Image generation API
 app.post('/api/generate-image', async (req, res) => {
   try {
     const body = (req.body && typeof req.body === 'object') ? req.body : {};
@@ -339,7 +339,7 @@ app.post('/api/generate-image', async (req, res) => {
     console.log(`[Image Gen] Request received (descriptionLength=${descriptionLength})`);
 
     const rawDesc = (description ?? '').toString();
-    // 改用更宽松的策略：仅移除不可见的控制字符，保留所有可见字符（包括所有语言和标点）
+    // Use a permissive cleanup strategy: only remove invisible control characters and keep visible text, punctuation, and multilingual content.
     const cleanStr = (s) => {
       // eslint-disable-next-line no-control-regex
       return s.replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -352,7 +352,7 @@ app.post('/api/generate-image', async (req, res) => {
     const toneClean = cleanStr(body?.tone ?? '').slice(0, 180);
     const styleGuideClean = cleanStr(body?.styleGuide ?? '').slice(0, 280);
 
-    const stylePreset = 'Cinematic, gritty survival horror. Nighttime. Low-key lighting. Desaturated color palette. 35mm film look, subtle film grain. Realistic. No text, no logos, no watermarks.';
+    const stylePreset = 'High-quality story illustration matching the scene, tone, genre, and world context. Clear composition, atmospheric lighting, coherent visual style, no text, no logos, no watermarks.';
 
     const parts = [
       `STYLE: ${stylePreset}`,
@@ -447,7 +447,7 @@ app.post('/api/generate-image', async (req, res) => {
   }
 });
 
-// 3. 图片代理 API (解决混合内容/CORS 问题)
+// 3. Image proxy API for mixed-content and CORS issues.
 app.get('/api/proxy-image', async (req, res) => {
   const { url } = req.query;
   if (!url) return res.status(400).send('Missing url parameter');
@@ -464,7 +464,7 @@ app.get('/api/proxy-image', async (req, res) => {
   }
 });
 
-// SPA 路由兜底：处理所有未匹配的请求
+// SPA route fallback for all unmatched requests.
 app.use((req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ error: 'API route not found' });

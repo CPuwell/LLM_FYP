@@ -80,7 +80,7 @@
 .player-description {
   font-size: 1.1em;
   line-height: 1.6;
-  white-space: pre-wrap; /* 保持换行符 */
+  white-space: pre-wrap; /* Preserve line breaks. */
 }
 
 .player-runtime-loading {
