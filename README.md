@@ -45,7 +45,7 @@ generated/           Runtime generated images, ignored by Git
 
 ## Environment Variables
 
-Create a local `.env` file in the project root:
+Copy `.env.example` to `.env` in the project root, then add your own Gemini API key:
 
 ```env
 GEMINI_API_KEY=your_gemini_api_key_here
@@ -66,6 +66,8 @@ VITE_API_BASE_URL=http://localhost:3001
 ```
 
 `AI_DEBUG=1` enables additional backend diagnostics such as prompt output and key fingerprint logging. Keep it disabled for normal demos.
+
+Do not commit a real `.env` file or API key. `.env.example` is safe to commit because it contains placeholders only.
 
 ## Installation
 
@@ -141,9 +143,11 @@ It can be used as a manual test story when demonstrating the editor and player m
 ## Notes
 
 - `.env`, `generated/`, `dist/`, `node_modules/`, `.vercel/`, and Python cache files are ignored by Git.
+- `.env.example` is included as a template for local configuration.
 - Generated images are stored locally under `generated/` at runtime.
 - Gemini debug endpoints are only enabled when `AI_DEBUG=1`.
 - API keys can be provided through the backend `.env` file or entered locally in the frontend API key modal.
+- For final source-code submission, exclude generated/runtime folders and dissertation files from the archive.
 
 ## FYP Focus
 

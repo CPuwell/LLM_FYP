@@ -16,7 +16,7 @@ export default function GuideModal({ isOpen, onClose }) {
             <h3>🔑 Getting Started (AI Setup)</h3>
             <ul>
               <li>To use AI features, click the <strong>Key icon</strong> at the top right to enter your <strong>Gemini API Key</strong>.</li>
-              <li>Your key is stored only in your browser's local storage and is sent directly to the AI service.</li>
+              <li>Your key is stored only in your browser's local storage and is sent to the backend only when an AI request needs it.</li>
             </ul>
           </section>
 
@@ -24,7 +24,7 @@ export default function GuideModal({ isOpen, onClose }) {
             <h3>🎮 Editor vs Player Mode</h3>
             <ul>
               <li><strong>Editor Mode</strong>: Build your world by adding nodes (scenes) and edges (choices).</li>
-              <li><strong>Player Mode</strong>: Toggle the switch at the top to test your story as a player.</li>
+              <li><strong>Player Mode</strong>: Click <strong>Play Story</strong> at the top to test your story as a player.</li>
               <li>In Player Mode, you can see how attributes change and how the AI describes the scene based on your past actions.</li>
             </ul>
           </section>
@@ -34,7 +34,7 @@ export default function GuideModal({ isOpen, onClose }) {
             <ul>
               <li><strong>Node</strong>: Represents a specific Location or Scene.</li>
               <li><strong>Edge</strong>: Represents a Choice or Action leading from one scene to another.</li>
-              <li><strong>World Bible</strong>: Your story's "source of truth". Define global rules, character traits, and location details here. The AI will strictly follow these.</li>
+              <li><strong>World Bible</strong>: Your story's "source of truth". Define global rules, character traits, and location details here so the AI can use them as guidance.</li>
             </ul>
           </section>
 
