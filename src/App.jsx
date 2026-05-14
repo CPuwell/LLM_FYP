@@ -189,6 +189,15 @@ const getInitialNodes = () => [
   { id: '1', type: 'custom', position: { x: 250, y: 50 }, data: { label: 'Story Start', description: '', imageUrl: '', location: '' } }
 ];
 
+const getNextNewSceneNumber = (nodes) => {
+  const maxGeneratedSceneNumber = (Array.isArray(nodes) ? nodes : []).reduce((max, node) => {
+    const label = typeof node?.data?.label === 'string' ? node.data.label.trim() : '';
+    const match = /^New Scene\s+(\d+)$/i.exec(label);
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+  return maxGeneratedSceneNumber + 1;
+};
+
 const initialNodes = JSON.parse(localStorage.getItem('storyNodes')) || getInitialNodes();
 const initialEdges = withEdgeLayout(JSON.parse(localStorage.getItem('storyEdges')) || [], initialNodes);
 const initialContext = localStorage.getItem('storyContext') || "An interactive fantasy fiction role play game. It is dusk, and there are dangerous woodland creatures around. Make each description atmospheric.";
@@ -475,11 +484,12 @@ function App() {
     setNodes((currentNodes) => {
       const preferred = getViewportCenterPosition();
       const position = findFreeNodePosition(preferred, currentNodes);
+      const nextSceneNumber = getNextNewSceneNumber(currentNodes);
       const newNode = {
         id: `${nodeId++}`,
         type: 'custom',
         position,
-        data: { label: `New Scene ${nodeId - 1}`, description: '', imageUrl: '', location: '' },
+        data: { label: `New Scene ${nextSceneNumber}`, description: '', imageUrl: '', location: '' },
       };
       return [...currentNodes, newNode];
     });
