@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseModelJson } from '../server/llm.js';
 import { validateGenerateRequest } from '../server/validate.js';
 import { buildWorldBibleSnippet } from '../server/worldBible.js';
 import { fetchProxiedImage } from '../server/proxyImage.js';
 import { parseMemoryJson } from '../server/memory.js';
 import { evaluateConditions } from '../src/attributeEngine.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(__dirname, '..');
+
+const readProjectFile = (...parts) => fs.readFileSync(path.join(projectRoot, ...parts), 'utf8');
 
 const testParseModelJson = () => {
   assert.deepEqual(
@@ -98,10 +106,56 @@ const testRequirementOr = () => {
   assert.equal(evaluateConditions({ a: true, b: false }, { all: [{ key: 'a', op: 'truthy' }, { key: 'b', op: 'truthy' }] }), false);
 };
 
+const testImageStylePreset = () => {
+  const serverSource = readProjectFile('server.js');
+  assert.match(serverSource, /High-quality story illustration matching the scene, tone, genre, and world context/);
+  assert.doesNotMatch(serverSource, /survival horror/i);
+};
+
+const testEnvExample = () => {
+  const envExample = readProjectFile('.env.example');
+  assert.match(envExample, /GEMINI_API_KEY=your_gemini_api_key_here/);
+  assert.doesNotMatch(envExample, /AIza[0-9A-Za-z_-]{20,}/);
+};
+
+const testNoChineseSourceText = () => {
+  const excludedDirs = new Set([
+    '.git',
+    '.tmp_testform_pages',
+    '.vercel',
+    '__pycache__',
+    'dist',
+    'generated',
+    'node_modules',
+    'submission_source',
+  ]);
+  const extensions = new Set(['.css', '.html', '.js', '.json', '.jsx', '.md', '.mjs', '.svg']);
+  const findings = [];
+
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (!excludedDirs.has(entry.name)) walk(path.join(dir, entry.name));
+        continue;
+      }
+      if (!entry.isFile() || !extensions.has(path.extname(entry.name))) continue;
+      const filePath = path.join(dir, entry.name);
+      const text = fs.readFileSync(filePath, 'utf8');
+      if (/\p{Script=Han}/u.test(text)) findings.push(path.relative(projectRoot, filePath));
+    }
+  };
+
+  walk(projectRoot);
+  assert.deepEqual(findings, []);
+};
+
 testParseModelJson();
 testValidateGenerateRequest();
 testWorldBibleSnippet();
 await testProxyImageValidation();
 testParseMemoryJson();
 testRequirementOr();
+testImageStylePreset();
+testEnvExample();
+testNoChineseSourceText();
 console.log('selfcheck ok');
